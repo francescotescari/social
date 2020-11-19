@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 from PIL import Image
 from PIL.JpegImagePlugin import convert_dict_qtables
@@ -79,3 +81,40 @@ def imread2f_pil(stream, channel=1, dtype=np.float32):
     else:
         img = np.asarray(img).astype(dtype) / 256.0
     return img, mode
+
+
+
+
+def imread_mode(filename, mode="RGB", dtype=np.float32):
+    image = np.asarray(Image.open(filename).convert(mode)).astype(dtype)
+    if np.issubdtype(dtype, np.integer):
+        return image
+    else:
+        return image/256.0
+
+class FileWalker:
+
+    def __init__(self, origin_dir, filter_function=None):
+        self.origin_dir = origin_dir
+        self.filter_function = filter_function
+
+    def consume(self, consume_function):
+        log("Finding files in %s" % self.origin_dir)
+        for root, dirs, files in os.walk(self.origin_dir, topdown=False):
+            for name in files:
+                filename = os.path.join(root, name)
+                if self.filter_function is None or not self.filter_function(filename):
+                    continue
+                consume_function(filename)
+
+    def __iter__(self):
+        return iter(self.collect())
+
+    def collect(self):
+        filenames = []
+
+        def append(fn):
+            filenames.append(fn)
+
+        self.consume(append)
+        return filenames

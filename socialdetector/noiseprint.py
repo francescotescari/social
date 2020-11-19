@@ -47,7 +47,7 @@ class FullConvNet(object):
 
     def _batch_norm(self, x, name='bnorm'):
         """Batch normalization."""
-        with tf.variable_scope(name, reuse=True):
+        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             params_shape = [x.get_shape()[-1]]
 
             moving_mean = tf.get_variable(
@@ -84,7 +84,7 @@ class FullConvNet(object):
 
     def _bias(self, x, name='bias'):
         """Bias term."""
-        with tf.variable_scope(name, reuse=True):
+        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             params_shape = [x.get_shape()[-1]]
             beta = tf.get_variable(
                 'beta', params_shape, tf.float32,
@@ -96,7 +96,7 @@ class FullConvNet(object):
 
     def _conv(self, x, filter_size, out_filters, stride, name='conv'):
         """Convolution."""
-        with tf.variable_scope(name, reuse=True):
+        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             in_filters = int(x.get_shape()[-1])
             n = filter_size * filter_size * np.maximum(in_filters, out_filters)
             kernel = tf.get_variable(
@@ -159,7 +159,8 @@ class NoiseprintEngine:
                 index1end = index1 + self.slide + self.overlap
                 clip = img[max(index0start, 0): min(index0end, img.shape[0]), \
                        max(index1start, 0): min(index1end, img.shape[1])]
-                resB = self.session.run(self.model.output, feed_dict={self.input_data: clip[np.newaxis, :, :, np.newaxis]})
+                resB = self.session.run(self.model.output,
+                                        feed_dict={self.input_data: clip[np.newaxis, :, :, np.newaxis]})
                 resB = np.squeeze(resB)
 
                 if index0 > 0:
@@ -218,7 +219,8 @@ def gen_noiseprint(image, quality=None):
     with NoiseprintEngine(quality) as engine:
         return engine.predict(image)
 
-def normalize_noiseprint(noiseprint):
-    v_min = np.min(noiseprint[34:-34,34:-34])
-    v_max = np.max(noiseprint[34:-34,34:-34])
-    return ((noiseprint-v_min)/(v_max-v_min)).clip(0, 1)
+
+def normalize_noiseprint(noiseprint, margin=34):
+    v_min = np.min(noiseprint[margin:-margin, margin:-margin])
+    v_max = np.max(noiseprint[margin:-margin, margin:-margin])
+    return ((noiseprint - v_min) / (v_max - v_min)).clip(0, 1)
