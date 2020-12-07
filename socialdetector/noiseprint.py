@@ -8,7 +8,7 @@ from socialdetector.utility import log, jpeg_qtableinv, imread2f_pil
 class FullConvNet(object):
     """FullConvNet model."""
 
-    def __init__(self, images, bnorm_decay, falg_train, num_levels=17, padding='SAME'):
+    def __init__(self, bnorm_decay, falg_train, num_levels=17, padding='SAME'):
         """FullConvNet constructor."""
 
         self._num_levels = num_levels
@@ -24,14 +24,18 @@ class FullConvNet(object):
         self._bnorm_decay = bnorm_decay
 
         self.level = [None, ] * self._num_levels
-        self.input = images
+
         self.falg_train = falg_train
         self.extra_train = []
         self.variables_list = []
         self.trainable_list = []
         self.decay_list = []
         self.padding = padding
+        self.input = None
+        self.output = None
 
+    def run(self, images):
+        self.input = images
         x = self.input
         for i in range(self._num_levels):
             with tf.variable_scope('level_%d' % i):
@@ -44,6 +48,7 @@ class FullConvNet(object):
                 x = self._actfun[i](x, name='active')
                 self.level[i] = x
         self.output = x
+        return x
 
     def _batch_norm(self, x, name='bnorm'):
         """Batch normalization."""
@@ -110,12 +115,8 @@ class FullConvNet(object):
         return y
 
 
-tf.disable_eager_execution()
-
-
 class NoiseprintEngine:
-    input_data = tf.placeholder(tf.float32, [1, None, None, 1], name="input_data")
-    noiseprint_model = FullConvNet(input_data, 0.9, tf.constant(False), num_levels=17)
+    noiseprint_model = FullConvNet(0.9, tf.constant(False), num_levels=17)
     saver = tf.train.Saver(noiseprint_model.variables_list)
     checkpoint_template = os.path.join(os.path.dirname(__file__), './noiseprint/net_jpg%d/model')
     configSess = tf.ConfigProto()
@@ -159,8 +160,7 @@ class NoiseprintEngine:
                 index1end = index1 + self.slide + self.overlap
                 clip = img[max(index0start, 0): min(index0end, img.shape[0]), \
                        max(index1start, 0): min(index1end, img.shape[1])]
-                resB = self.session.run(self.model.output,
-                                        feed_dict={self.input_data: clip[np.newaxis, :, :, np.newaxis]})
+                resB = self.model.run(clip[np.newaxis, :, :, np.newaxis])
                 resB = np.squeeze(resB)
 
                 if index0 > 0:
@@ -175,8 +175,7 @@ class NoiseprintEngine:
 
     def predict_small(self, img):
         self.ensure_open()
-        res = self.session.run(self.noiseprint_model.output,
-                               feed_dict={self.input_data: img[np.newaxis, :, :, np.newaxis]})
+        res = self.model.run(img[np.newaxis, :, :, np.newaxis])
         return np.squeeze(res)
 
     def predict(self, img):

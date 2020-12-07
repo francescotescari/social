@@ -86,35 +86,50 @@ def imread2f_pil(stream, channel=1, dtype=np.float32):
 
 
 def imread_mode(filename, mode="RGB", dtype=np.float32):
-    image = np.asarray(Image.open(filename).convert(mode)).astype(dtype)
-    if np.issubdtype(dtype, np.integer):
-        return image
+
+    image = np.asarray(Image.open(filename).convert(mode))
+    orig_type = image.dtype
+    if np.issubdtype(orig_type, np.integer):
+        return image if np.issubdtype(dtype, np.integer) else image.astype(np.float32)/256
     else:
-        return image/256.0
+        return (image*256).astype(np.int32) if np.issubdtype(dtype, np.integer) else image
 
 class FileWalker:
 
     def __init__(self, origin_dir, filter_function=None):
         self.origin_dir = origin_dir
         self.filter_function = filter_function
+        self.file_iterators = None
 
-    def consume(self, consume_function):
-        log("Finding files in %s" % self.origin_dir)
-        for root, dirs, files in os.walk(self.origin_dir, topdown=False):
-            for name in files:
-                filename = os.path.join(root, name)
-                if self.filter_function is None or not self.filter_function(filename):
-                    continue
-                consume_function(filename)
+    def __next__(self):
+        while True:
+            if self.file_iterators is None:
+                file_iterator = iter(os.walk(self.origin_dir, topdown=False))
+                root, dirs, files = next(file_iterator)
+                self.file_iterators = [file_iterator, (root, iter(files))]
+            while True:
+                root, fi = self.file_iterators[1]
+                try:
+                    name = next(fi)
+                except StopIteration:
+                    root, _, files = next(self.file_iterators[0])
+                    self.file_iterators[1] = (root, iter(files))
+                else:
+                    break
+            path = os.path.join(root, name)
+            if self.filter_function is None or self.filter_function(path):
+                return path
+
 
     def __iter__(self):
-        return iter(self.collect())
+        return FileWalker(self.origin_dir, self.filter_function)
 
-    def collect(self):
-        filenames = []
 
-        def append(fn):
-            filenames.append(fn)
 
-        self.consume(append)
-        return filenames
+def isiterable(o):
+    try:
+        iter(o)
+    except:
+        return False
+    else:
+        return True
