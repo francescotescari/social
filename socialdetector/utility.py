@@ -133,3 +133,6 @@ def isiterable(o):
         return False
     else:
         return True
+
+def is_listing(o):
+    return isinstance(o, list) or isinstance(o, tuple)

@@ -72,8 +72,6 @@ class GenericModel:
 
     def train_with_generator(self, training_data_generator, epochs,
                              steps_per_epoch, validation_data=None):
-        if validation_data is not None and False:
-            self.registered_callbacks.append(DumpValidationPredictions(data=validation_data))
         self.model.fit(training_data_generator,
                        use_multiprocessing=True, workers=4, steps_per_epoch=steps_per_epoch,
                        callbacks=self.registered_callbacks, epochs=epochs, verbose=1,
