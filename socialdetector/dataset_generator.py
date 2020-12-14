@@ -5,31 +5,9 @@ from tensorflow.python.data import Dataset
 import tensorflow as tf
 from tensorflow.python.data.experimental.ops.matching_files import MatchingFilesDataset
 
+from socialdetector.dataset_utils import *
 from socialdetector.dct_utils import blockwise_dct_matrix, coefficient_order
 from socialdetector.utility import imread_mode, is_listing
-
-
-def tf_print(*args):
-    tf.numpy_function(lambda x: print(x), args, [])
-    return args[0]
-
-
-def path_bind(dst_path: str, origin_dir: str):
-    def apply(path):
-        path = path.decode("utf-8")
-        dir_path, name = os.path.split(os.path.abspath(path))
-        relative_dir_path = os.path.relpath(dir_path, origin_dir)
-        return os.path.join(dst_path, relative_dir_path, name)
-
-    return lambda path: tf.numpy_function(apply, [path], tf.string)
-
-
-def path_append(append: str):
-    return lambda path: path + append
-
-
-def load_image(mode="RGB", dtype=np.uint8):
-    return lambda x: tf.numpy_function(lambda path: imread_mode(path, mode, dtype), [x], dtype)
 
 
 def get_quantization_table():
@@ -50,21 +28,6 @@ def block_dct():
         return tensor
 
     return apply
-
-
-def split_image_fn(tile_size, strides=None):
-    t = [1, *tile_size, 1]
-    r = [1 for _ in t]
-    if strides is None:
-        s = t
-    else:
-        s = [1, *strides, 1]
-
-    def split(image):
-        patches = tf.image.extract_patches(image, sizes=t, strides=s, rates=r, padding='VALID')
-        return tf.reshape(patches[0], (-1, *tile_size, *image.shape[3:]))
-
-    return split
 
 
 def reshape_block_dct(considered_coefficients=10):
@@ -111,22 +74,6 @@ def encode_coefficients_my(considered_coefficients=10):
     return apply
 
 
-def add_properties(properties):
-    def apply(x):
-        x.update(properties)
-        return x
-
-    return apply
-
-
-def log_message(fn):
-    def apply(x):
-        print(fn(x))
-        return x
-
-    return apply
-
-
 def load_noiseprint():
     def apply(path):
         data = np.load(path)
@@ -168,48 +115,24 @@ def full_dataset(path_ds, dct_encoding, noiseprint_path, origin_path=None, consi
     return Dataset.zip(datasets) if len(datasets) > 1 else datasets[0]
 
 
-def datasets_concatenate(datasets):
-    ds = datasets[0]
-    for d in datasets[1:]:
-        ds = ds.concatenate(d)
-    return ds
-
-
-def datasets_interleave(datasets, block_length=None, cycle_length=None):
-    datasets = tuple(datasets)
-    if cycle_length is not None:
-        return datasets_concatenate(
-            [datasets_interleave(datasets[i:i + cycle_length], block_length=block_length) for i in
-             range(0, len(datasets), cycle_length)])
-
-    choices = Dataset.range(len(datasets))
-    if block_length is not None:
-        choices = choices.flat_map(lambda x: Dataset.from_tensors(x).repeat(block_length))
-
-    return tf.data.experimental.choose_from_datasets(datasets, choices.cache().repeat())
-
-
-def print_ds(ds):
-    print(list(ds.as_numpy_iterator()))
-
-
-def my_data_generator(class_dirs, validate, test, shuffle, batch_size, seed, print_val_tst_set=True, noiseprint_path=None,
+def my_data_generator(class_dirs, validate, test, shuffle, batch_size, seed, print_val_tst_set=True,
+                      noiseprint_path=None,
                       dct_encoding=None, **kwargs):
     if not is_listing(batch_size):
         batch_size = tuple(batch_size for _ in range(3))
 
     def my_datasets(folder, label, g_seed):
         path_ds = MatchingFilesDataset(folder)
-        path_ds = path_ds.shuffle(10000000, seed=seed, reshuffle_each_iteration=False) # Load all paths shuffled
+        path_ds = path_ds.shuffle(10000000, seed=seed, reshuffle_each_iteration=False)  # Load all paths shuffled
 
         val = path_ds.take(validate).cache()
         tst = path_ds.skip(validate).take(test).cache()
         trn = path_ds.skip(validate + test).cache().shuffle(1000, reshuffle_each_iteration=True)
 
         if print_val_tst_set:
-            print("Validation files:")
+            print("Validation files of %s:" % folder)
             print_ds(val)
-            print("Test files:")
+            print("Test files of %s:" % folder)
             print_ds(tst)
 
         def generator(p_ds):
@@ -237,3 +160,66 @@ def my_data_generator(class_dirs, validate, test, shuffle, batch_size, seed, pri
             interleaved = interleaved.batch(batch_size[i])
         output.append(interleaved)
     return output
+
+
+default_seed = 12321
+
+
+class Splittable:
+    estimated_len = None
+
+    def split_build(self, batch_size=(256, 256, 0), encoding=None, noiseprint=False, **additional_configs):
+        raise NotImplementedError
+
+    @staticmethod
+    def merge(splittables, ratios=1):
+
+        def split_build(*args, **kwargs):
+            trains = []
+            vals = []
+            tests = []
+            for split in splittables:
+                t, v, ts = split.split_build(*args, **kwargs)
+                trains.append(t)
+                vals.append(v)
+                tests.append(ts)
+            return datasets_interleave(trains, ratios), datasets_interleave(vals, ratios), datasets_interleave(tests, ratios)
+
+        res = lambda : None
+        res.split_build = split_build
+        return res
+
+
+
+
+
+class DatasetSpec(Splittable):
+
+    def __init__(self, class_dirs, noiseprint_dir, origin_dir, default_validation, default_test):
+        self.class_dirs = class_dirs
+        self.noiseprint_path = noiseprint_dir
+        self.origin_path = origin_dir
+        self.default_validation = default_validation
+        self.default_test = default_test
+
+    def split_build(self, batch_size=(256, 256, 0), encoding=None, noiseprint=False, **additional_configs):
+        config = {
+            'class_dirs': self.class_dirs,
+            'seed': default_seed,
+            'validate': self.default_validation,
+            'test': self.default_test,
+            'batch_size': batch_size,
+            'dct_encoding': encoding,
+            'shuffle': 5000
+        }
+        if noiseprint:
+            config['noiseprint_path'] = self.noiseprint_path
+            config['origin_path'] = self.origin_path
+        config.update(additional_configs)
+
+        train, validation, test = my_data_generator(**config)
+        validation = validation.cache()
+        test = test.cache()
+        train = train
+
+        return train, validation, test

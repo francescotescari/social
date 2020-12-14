@@ -32,7 +32,7 @@ class GenericModel:
     def __init__(self):
         self.model = None
         self.registered_callbacks = []
-        self.id = 'model_'+str(time())
+        self.id = 'model_%d' % round(time())
         """config = ConfigProto()
         config.gpu_options.per_process_gpu_memory_fraction = 0.40
         config.gpu_options.allow_growth = True
@@ -59,16 +59,16 @@ class GenericModel:
 
         if tensorboard_logs_folder is not None:
             self.registered_callbacks.append(
-                TensorBoard(log_dir=os.path.join(tensorboard_logs_folder, self.id), histogram_freq=0, write_graph=True, write_images=True))
+                TensorBoard(log_dir=os.path.join(tensorboard_logs_folder, self.id), histogram_freq=0, write_graph=True,
+                            write_images=True))
 
         if checkpoint_path is not None:
             if not os.path.exists(os.path.join(checkpoint_path, self.id)):
                 os.makedirs(os.path.join(checkpoint_path, self.id))
-            print("Storing to %s" % os.path.join(checkpoint_path, self.id, '{epoch:02d}-{loss:.4f}-{val_loss:.4f}.h5'))
+            store_path = os.path.join(checkpoint_path, self.id, 'e{epoch:02d}-l{loss:.4f}-b{val_loss:.4f}.h5')
+            print("Storing to %s" % store_path)
             self.registered_callbacks.append(
-                ModelCheckpoint(os.path.join(checkpoint_path, self.id, '{epoch:02d}-{loss:.4f}-{val_loss:.4f}.h5'),
-                                monitor='val_loss', verbose=1, period=1, save_best_only=False,
-                                mode='min'))
+                ModelCheckpoint(store_path, monitor='val_loss', verbose=1, period=1, save_best_only=False, mode='min'))
 
     def train_with_generator(self, training_data_generator, epochs,
                              steps_per_epoch, validation_data=None):

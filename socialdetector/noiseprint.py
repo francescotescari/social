@@ -8,7 +8,7 @@ from socialdetector.utility import log, jpeg_qtableinv, imread2f_pil
 class FullConvNet(object):
     """FullConvNet model."""
 
-    def __init__(self, bnorm_decay, falg_train, num_levels=17, padding='SAME'):
+    def __init__(self, images, bnorm_decay, falg_train, num_levels=17, padding='SAME'):
         """FullConvNet constructor."""
 
         self._num_levels = num_levels
@@ -24,18 +24,14 @@ class FullConvNet(object):
         self._bnorm_decay = bnorm_decay
 
         self.level = [None, ] * self._num_levels
-
+        self.input = images
         self.falg_train = falg_train
         self.extra_train = []
         self.variables_list = []
         self.trainable_list = []
         self.decay_list = []
         self.padding = padding
-        self.input = None
-        self.output = None
 
-    def run(self, images):
-        self.input = images
         x = self.input
         for i in range(self._num_levels):
             with tf.variable_scope('level_%d' % i):
@@ -48,11 +44,10 @@ class FullConvNet(object):
                 x = self._actfun[i](x, name='active')
                 self.level[i] = x
         self.output = x
-        return x
 
     def _batch_norm(self, x, name='bnorm'):
         """Batch normalization."""
-        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
+        with tf.variable_scope(name):
             params_shape = [x.get_shape()[-1]]
 
             moving_mean = tf.get_variable(
@@ -89,7 +84,7 @@ class FullConvNet(object):
 
     def _bias(self, x, name='bias'):
         """Bias term."""
-        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
+        with tf.variable_scope(name):
             params_shape = [x.get_shape()[-1]]
             beta = tf.get_variable(
                 'beta', params_shape, tf.float32,
@@ -101,7 +96,7 @@ class FullConvNet(object):
 
     def _conv(self, x, filter_size, out_filters, stride, name='conv'):
         """Convolution."""
-        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
+        with tf.variable_scope(name):
             in_filters = int(x.get_shape()[-1])
             n = filter_size * filter_size * np.maximum(in_filters, out_filters)
             kernel = tf.get_variable(
@@ -116,8 +111,10 @@ class FullConvNet(object):
 
 
 class NoiseprintEngine:
-    noiseprint_model = FullConvNet(0.9, tf.constant(False), num_levels=17)
-    saver = tf.train.Saver(noiseprint_model.variables_list)
+    tf.reset_default_graph()
+    x_data = tf.placeholder(tf.float32, [1, None, None, 1], name="x_data")
+    net = FullConvNet(x_data, 0.9, tf.constant(False), num_levels=17)
+    saver = tf.train.Saver(net.variables_list)
     checkpoint_template = os.path.join(os.path.dirname(__file__), './noiseprint/net_jpg%d/model')
     configSess = tf.ConfigProto()
     configSess.gpu_options.allow_growth = True
@@ -127,7 +124,7 @@ class NoiseprintEngine:
 
     def __init__(self, quality=101):
         self.quality = quality
-        self.model = self.noiseprint_model
+        self.model = self.net
         self.session = None
         self.loaded_quality = None
 
@@ -160,7 +157,7 @@ class NoiseprintEngine:
                 index1end = index1 + self.slide + self.overlap
                 clip = img[max(index0start, 0): min(index0end, img.shape[0]), \
                        max(index1start, 0): min(index1end, img.shape[1])]
-                resB = self.model.run(clip[np.newaxis, :, :, np.newaxis])
+                resB = self.session.run(self.model.output, feed_dict={self.x_data: clip[np.newaxis, :, :, np.newaxis]})
                 resB = np.squeeze(resB)
 
                 if index0 > 0:
@@ -175,7 +172,7 @@ class NoiseprintEngine:
 
     def predict_small(self, img):
         self.ensure_open()
-        res = self.model.run(img[np.newaxis, :, :, np.newaxis])
+        res = self.session.run(self.model.output, feed_dict={self.x_data: img[np.newaxis, :, :, np.newaxis]})
         return np.squeeze(res)
 
     def predict(self, img):

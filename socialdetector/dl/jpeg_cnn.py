@@ -19,10 +19,10 @@ class PaperCNNModel(GenericModel):
         layer = Flatten()(layer)
         #layer = Dropout(0.125)(layer)
         layer = Dense(256, activation=self.activation)(layer)
-        #layer = Dropout(0.25)(layer)
+        layer = Dropout(0.25)(layer)
         layer = Dense(256, activation=self.activation)(layer)
-        #layer = Dropout(0.25)(layer)
-        #layer = Dense(256, activation=self.activation)(layer)
+        layer = Dropout(0.25)(layer)
+        layer = Dense(256, activation=self.activation)(layer)
         layer = Dense(3, activation='softmax')(layer)
         return layer
 
