@@ -3,7 +3,7 @@ import os
 import numpy as np
 from tensorflow.python.data import Dataset
 
-from socialdetector.utility import imread_mode, is_listing
+from socialdetector.utility import imread_mode, is_listing, glob_iterator, path_glob_iterator
 
 
 def print_ds(ds):
@@ -33,8 +33,13 @@ def split_image_fn(tile_size, strides=None):
 
 
 def tf_print(*args):
-    tf.numpy_function(lambda x: print(x), args, [], name="tf_print_py")
+    tf.print(*args)
+    #tf.numpy_function(lambda x: print(x), args, [], name="tf_print_py")
     return args[0]
+
+def str_endswith(end_regex):
+    rg = ".*"+end_regex+"$"
+    return lambda x: tf.strings.regex_full_match(x, rg, name="tf_ends_with")
 
 
 def path_bind(dst_path: str, origin_dir: str):
@@ -72,3 +77,12 @@ def datasets_interleave(datasets, block_length=None, cycle_length=None):
              range(len(datasets))])
 
     return tf.data.experimental.choose_from_datasets(datasets, choices.cache().repeat())
+
+
+def glob_dataset(pattern, recursive=True):
+    return Dataset.from_generator(lambda: glob_iterator(pattern, recursive=recursive), output_types=tf.string)
+
+
+def path_glob_dataset(path, pattern, recursive=True):
+    return Dataset.from_generator(lambda: path_glob_iterator(path, pattern, recursive=recursive),
+                                  output_types=tf.string)

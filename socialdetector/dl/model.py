@@ -32,7 +32,8 @@ class GenericModel:
     def __init__(self):
         self.model = None
         self.registered_callbacks = []
-        self.id = 'model_%d' % round(time())
+        self.id = 'generic_model'
+        self.time = round(time())
         """config = ConfigProto()
         config.gpu_options.per_process_gpu_memory_fraction = 0.40
         config.gpu_options.allow_growth = True
@@ -56,16 +57,17 @@ class GenericModel:
 
     def register_std_callbacks(self, tensorboard_logs_folder=None, checkpoint_path=None):
         self.require_model_loaded()
-
+        folder_id = os.path.join(self.id, str(self.time))
         if tensorboard_logs_folder is not None:
             self.registered_callbacks.append(
-                TensorBoard(log_dir=os.path.join(tensorboard_logs_folder, self.id), histogram_freq=0, write_graph=True,
+                TensorBoard(log_dir=os.path.join(tensorboard_logs_folder, folder_id), histogram_freq=0, write_graph=True,
                             write_images=True))
 
         if checkpoint_path is not None:
-            if not os.path.exists(os.path.join(checkpoint_path, self.id)):
-                os.makedirs(os.path.join(checkpoint_path, self.id))
-            store_path = os.path.join(checkpoint_path, self.id, 'e{epoch:02d}-l{loss:.4f}-b{val_loss:.4f}.h5')
+            store_path = os.path.join(checkpoint_path, folder_id)
+            if not os.path.exists(store_path):
+                os.makedirs(store_path)
+            store_path = os.path.join(store_path, 'e{epoch:02d}-l{loss:.4f}-v{val_loss:.4f}.h5')
             print("Storing to %s" % store_path)
             self.registered_callbacks.append(
                 ModelCheckpoint(store_path, monitor='val_loss', verbose=1, period=1, save_best_only=False, mode='min'))

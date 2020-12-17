@@ -6,18 +6,18 @@ from socialdetector.dl.model import GenericModel
 
 class PaperCNNModel(GenericModel):
     conv_activation = 'relu'
-    activation = 'relu'
+    activation = 'swish'
 
     def model_structure(self, input_img):
         layer = input_img
         layer = Conv1D(100, 3, activation=self.conv_activation)(layer)
-        #layer = BatchNormalization()(layer)
+        layer = BatchNormalization()(layer)
         layer = MaxPooling1D()(layer)
         layer = Conv1D(100, 3, activation=self.conv_activation)(layer)
-        #layer = BatchNormalization()(layer)
+        layer = BatchNormalization()(layer)
         layer = MaxPooling1D()(layer)
         layer = Flatten()(layer)
-        #layer = Dropout(0.125)(layer)
+        layer = Dropout(0.125)(layer)
         layer = Dense(256, activation=self.activation)(layer)
         layer = Dropout(0.25)(layer)
         layer = Dense(256, activation=self.activation)(layer)
@@ -45,8 +45,8 @@ class MyCNNJpeg(GenericModel):
         layer = Conv2D(100, (3, 3), activation=self.conv_activation, padding=self.padding, data_format='channels_first')(layer)
         layer = BatchNormalization()(layer)
         layer = Conv2D(100, (3, 3), activation=self.conv_activation, padding=self.padding, data_format='channels_first')(layer)
-        layer = BatchNormalization()(layer)
-        layer = MaxPooling2D((2,2), data_format='channels_first')(layer)
+        #layer = BatchNormalization()(layer)
+        #layer = MaxPooling2D((2,2), data_format='channels_first')(layer)
         layer = Flatten()(layer)
         # layer = Dropout(0.125)(layer)
         layer = Dense(256, activation=self.activation)(layer)

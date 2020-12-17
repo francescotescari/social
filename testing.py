@@ -1,28 +1,25 @@
-from tensorflow.python.data import Dataset
-
 import socialdetector.tf_options_setter
-import tensorflow as tf
+from data_loader import ucid_social, ucid_public
+from experiments import NoiseprintOnly, MyJpeg, JpegPaper
 
-from data_loader import ucid_social
-from socialdetector.dataset_generator import encode_coefficients_my
-from socialdetector.dl.model import GenericModel
 
-train, validation, test = ucid_social(encoding=encode_coefficients_my)
+def test_noiseprintonly():
+    path = "./history/noiseprint_only/ucid_public/1608137326/e10-l0.1924-v0.3477.h5"
 
-t1 = test.filter(lambda x, y: tf.reduce_all(tf.equal(y, [1, 0, 0]))).batch(128)
-t2 = test.filter(lambda x, y: tf.reduce_all(tf.equal(y, [0, 1, 0]))).batch(128)
-t3 = test.filter(lambda x, y: tf.reduce_all(tf.equal(y, [0, 0, 1]))).batch(128)
+    experiment = NoiseprintOnly(ucid_social)
+    experiment.load_from(path).evaluate()
 
-b_test = test.batch(256)
 
-load_path = ".\\history\\model_1607342670.0880523\\40-0.0501-0.0531.h5"
-load_path = "./history/model_1607596343.5289435/33-0.0343-0.0494.h5"
-#load_path = "./history/model_1607342670.0880523/135-0.0843-0.0447.h5"
+def test_myjpeg():
+    path = "./history/my_jpeg/ucid_social/1608161156/e39-l0.0155-v0.0851.h5"
+    experiment = MyJpeg(ucid_social)
+    experiment.load_from(path).evaluate()
 
-m = GenericModel.load_from(load_path)
-#m.register_std_callbacks(tensorboard_logs_folder='./tsboard', checkpoint_path='./history')
-# m.registered_callbacks.append(PredictCallback('./validate'))
-m.model.evaluate(t1)
-m.model.evaluate(t2)
-m.model.evaluate(t3)
-m.model.evaluate(b_test)
+
+def test_paperjpeg():
+    path = "./history/jpeg_paper/1608074487/e39-l0.1786-v0.1852.h5"
+    path = "./history/jpeg_paper/1608074487/e35-l0.1290-v0.2095.h5"
+    experiment = JpegPaper(ucid_public)
+    experiment.load_from(path).evaluate()
+
+test_myjpeg()

@@ -1,8 +1,11 @@
+import glob
 import os
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
 from PIL.JpegImagePlugin import convert_dict_qtables
+from tensorflow.python.data import Dataset
 
 
 def log(*args, **kwargs):
@@ -83,16 +86,78 @@ def imread2f_pil(stream, channel=1, dtype=np.float32):
     return img, mode
 
 
-
-
 def imread_mode(filename, mode="RGB", dtype=np.float32):
-
     image = np.asarray(Image.open(filename).convert(mode))
     orig_type = image.dtype
     if np.issubdtype(orig_type, np.integer):
-        return image if np.issubdtype(dtype, np.integer) else image.astype(np.float32)/256
+        return image if np.issubdtype(dtype, np.integer) else image.astype(np.float32) / 256
     else:
-        return (image*256).astype(np.int32) if np.issubdtype(dtype, np.integer) else image
+        return (image * 256).astype(np.int32) if np.issubdtype(dtype, np.integer) else image
+
+
+class _TreeIterator:
+
+    def __init__(self, *iterators_gen):
+        self.depth = len(iterators_gen)
+        self.loaded_iterators = [None for _ in range(self.depth)]
+        self.last_i = self.depth - 1
+        self.gen = iterators_gen
+        self.loaded_iterators[0] = iterators_gen[0](None)
+
+    def __iter__(self):
+        return _TreeIterator(*self.gen)
+
+    def _next_i(self, i):
+        it = self.loaded_iterators[i]
+        while True:
+            if it is None:
+                it = self.gen[i](self._next_i(i - 1))
+                self.loaded_iterators[i] = it
+            try:
+                return next(it)
+            except StopIteration:
+                if i == 0:
+                    raise
+                else:
+                    it = None
+
+    def __next__(self):
+        return self._next_i(self.last_i)
+
+
+class _MapIterator:
+
+    def __init__(self, it, map_fn):
+        self.it = it
+        self.map_fn = map_fn
+
+    def __next__(self):
+        return self.map_fn(next(self.it))
+
+    def __iter__(self):
+        return self
+
+
+def count_iterator(iterator):
+    i = 0
+    try:
+        while True:
+            next(iterator)
+            i+=1
+    except StopIteration:
+        pass
+    return i
+
+
+def path_glob_iterator(path, pattern, recursive=True):
+    p = Path(path)
+    it = p.rglob(pattern) if recursive else p.glob(pattern)
+    return _MapIterator(it, lambda x: str(x))
+
+
+def glob_iterator(pattern, recursive=True):
+    return glob.iglob(pattern, recursive=recursive)
+
 
 class FileWalker:
 
@@ -120,10 +185,8 @@ class FileWalker:
             if self.filter_function is None or self.filter_function(path):
                 return path
 
-
     def __iter__(self):
         return FileWalker(self.origin_dir, self.filter_function)
-
 
 
 def isiterable(o):
@@ -133,6 +196,7 @@ def isiterable(o):
         return False
     else:
         return True
+
 
 def is_listing(o):
     return isinstance(o, list) or isinstance(o, tuple)
