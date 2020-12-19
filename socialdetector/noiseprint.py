@@ -1,122 +1,232 @@
+from tensorflow.python.keras.layers import Conv2D, BatchNormalization, Activation
+from tensorflow.python.training.tracking.data_structures import NoDependency
+
+import socialdetector.tf_options_setter
 import os
-import tensorflow.compat.v1 as tf
+import tensorflow as tf
 import numpy as np
+from tensorflow.python.keras.models import Model
 
 from socialdetector.utility import log, jpeg_qtableinv, imread2f_pil
+
+tf1 = tf.compat.v1
+
+
+def _si(value):
+    v = value.value()
+    return lambda shape, dtype: v
+
+
+class NpConv2D(tf.keras.layers.Layer):
+
+    def __init__(self, vl, filter_size, out_filters, stride, padding, scope_name='conv', **kwargs):
+        self.vl = vl
+        self._out_filters = out_filters
+        self._stride = stride
+        self._filter_size = filter_size
+        self._padding = padding
+        self.scope_name = scope_name
+        self.kernel = None
+        super().__init__(**kwargs)
+
+    def build(self, input_shape):
+        with tf1.variable_scope(self.scope_name):
+            in_filters = input_shape[-1]
+            n = self._filter_size * self._filter_size * np.maximum(in_filters, self._out_filters)
+            self.kernel = tf1.get_variable(
+                'weights', [self._filter_size, self._filter_size, in_filters, self._out_filters],
+                tf.float32, initializer=tf1.random_normal_initializer(
+                    stddev=np.sqrt(2.0 / n), dtype=tf.float32))
+            self.vl.append(self.kernel)
+
+    @tf.function
+    def call(self, inputs, training=None):
+        return tf.nn.conv2d(inputs, self.kernel, [1, self._stride, self._stride, 1], padding=self._padding)
+
+    def to_keras(self):
+        return Conv2D(self._out_filters, self._filter_size, (self._stride, self._stride), padding=self._padding,
+                      kernel_initializer=_si(self.kernel), use_bias=False, bias_initializer="zeros")
+
+
+class NpBatchNorm(tf.keras.layers.Layer):
+
+    def __init__(self, vl, scope_name='bn', **kwargs):
+        self.vl = vl
+        self.moving_mean = None
+        self.moving_variance = None
+        self.gamma = None
+        self.scope_name = scope_name
+        self._bnorm_init_var = 1e-4
+        self._bnorm_init_gamma = np.sqrt(2.0 / (9.0 * 64.0))
+        self._bnorm_epsilon = 1e-5
+        super().__init__(**kwargs)
+
+    def build(self, input_shape):
+        with tf1.variable_scope(self.scope_name):
+            params_shape = input_shape[-1]
+
+            self.moving_mean = tf1.get_variable(
+                'moving_mean', params_shape, tf.float32,
+                initializer=tf1.constant_initializer(0.0, dtype=tf.float32),
+                trainable=False)
+            self.moving_variance = tf1.get_variable(
+                'moving_variance', params_shape, tf.float32,
+                initializer=tf1.constant_initializer(self._bnorm_init_var, dtype=tf.float32),
+                trainable=False)
+
+            self.gamma = tf1.get_variable(
+                'gamma', params_shape, tf.float32,
+                initializer=tf1.random_normal_initializer(stddev=self._bnorm_init_gamma, dtype=tf.float32))
+
+            self.vl.extend((self.moving_mean, self.moving_variance, self.gamma))
+
+    @tf.function
+    def call(self, inputs, training=None):
+        return tf.nn.batch_normalization(
+            inputs, self.moving_mean, self.moving_variance, None, self.gamma, self._bnorm_epsilon)
+
+    def to_keras(self):
+        return BatchNormalization(moving_mean_initializer=_si(self.moving_mean),
+                                  moving_variance_initializer=_si(self.moving_variance),
+                                  gamma_initializer=_si(self.gamma), epsilon=self._bnorm_epsilon)
+
+
+class BiasLayer(tf.keras.layers.Layer):
+
+    def __init__(self, initial_value=None, **kwargs):
+        super(BiasLayer, self).__init__(**kwargs)
+        self.val = initial_value
+
+    def build(self, input_shape):
+        if self.val is None:
+            self.bias = self.add_weight('bias', shape=input_shape[-1], initializer="zeros")
+        else:
+            self.bias = self.add_weight('bias', shape=input_shape[-1],
+                                        initializer=lambda shape, dtype: tf.cast(self.val, dtype=dtype))
+
+    @tf.function
+    def call(self, inputs, training=None):
+        return inputs + self.bias
+
+
+class NpBias(tf.keras.layers.Layer):
+
+    def __init__(self, vl, scope_name='bias', **kwargs):
+        self.vl = vl
+        self.beta = None
+        self.scope_name = scope_name
+        super().__init__(**kwargs)
+
+    def build(self, input_shape):
+        with tf1.variable_scope(self.scope_name):
+            params_shape = input_shape[-1]
+            self.b = tf1.get_variable(
+                'beta', params_shape, tf.float32,
+                initializer=tf1.constant_initializer(0.0, dtype=tf.float32))
+            self.vl.append(self.b)
+
+    @tf.function
+    def call(self, inputs, training=None):
+        return inputs + self.b
+
+    def to_keras(self):
+        return BiasLayer(self.b.value())
+
+
+class NpActivation(tf.keras.layers.Layer):
+
+    def __init__(self, act_fun, scope_name='active', **kwargs):
+        self.act_fun = act_fun
+        self.scope_name = scope_name
+        super().__init__(**kwargs)
+
+    @tf.function
+    def call(self, inputs, training=None):
+        return self.act_fun(inputs)
+
+    def to_keras(self):
+        return Activation(self.act_fun)
 
 
 class FullConvNet(object):
     """FullConvNet model."""
 
-    def __init__(self, images, bnorm_decay, falg_train, num_levels=17, padding='SAME'):
+    def __init__(self, num_levels=17, padding='SAME'):
         """FullConvNet constructor."""
 
         self._num_levels = num_levels
         self._actfun = [tf.nn.relu, ] * (self._num_levels - 1) + [tf.identity, ]
-        self._f_size = [3, ] * self._num_levels
         self._f_num = [64, ] * (self._num_levels - 1) + [1, ]
-        self._f_stride = [1, ] * self._num_levels
         self._bnorm = [False, ] + [True, ] * (self._num_levels - 2) + [False, ]
-        self._res = [0, ] * self._num_levels
-        self._bnorm_init_var = 1e-4
-        self._bnorm_init_gamma = np.sqrt(2.0 / (9.0 * 64.0))
-        self._bnorm_epsilon = 1e-5
-        self._bnorm_decay = bnorm_decay
 
-        self.level = [None, ] * self._num_levels
-        self.input = images
-        self.falg_train = falg_train
-        self.extra_train = []
         self.variables_list = []
-        self.trainable_list = []
-        self.decay_list = []
-        self.padding = padding
+        self.k_input = tf.keras.layers.Input([None, None, 1])
 
-        x = self.input
+        model = self.k_input
+        vl = NoDependency(self.variables_list)
+
+        seq = []
+
+        def add_layer(lay):
+            seq.append(lay)
+            return lay
+
         for i in range(self._num_levels):
-            with tf.variable_scope('level_%d' % i):
-                x = self._conv(x, self._f_size[i], self._f_num[i], self._f_stride[i], name='conv')
+            with tf1.variable_scope('level_%d' % i):
+                model = add_layer(NpConv2D(vl, 3, self._f_num[i], 1, padding=padding))(model)
                 if self._bnorm[i]:
-                    x = self._batch_norm(x, name='bn')
-                x = self._bias(x, name='bias')
-                if self._res[i] > 0:
-                    x = x + self.level[i - self._res[i]]
-                x = self._actfun[i](x, name='active')
-                self.level[i] = x
-        self.output = x
+                    model = add_layer(NpBatchNorm(vl))(model)
+                model = add_layer(NpBias(vl))(model)
+                model = add_layer(NpActivation(self._actfun[i]))(model)
 
-    def _batch_norm(self, x, name='bnorm'):
-        """Batch normalization."""
-        with tf.variable_scope(name):
-            params_shape = [x.get_shape()[-1]]
+        self.model = Model(self.k_input, model)
+        self.model.summary()
+        self.seq = seq
 
-            moving_mean = tf.get_variable(
-                'moving_mean', params_shape, tf.float32,
-                initializer=tf.constant_initializer(0.0, dtype=tf.float32),
-                trainable=False)
-            moving_variance = tf.get_variable(
-                'moving_variance', params_shape, tf.float32,
-                initializer=tf.constant_initializer(self._bnorm_init_var, dtype=tf.float32),
-                trainable=False)
-            self.variables_list.append(moving_mean)
-            self.variables_list.append(moving_variance)
+    def run(self, x):
+        return self.model.predict(x)
 
-            gamma = tf.get_variable(
-                'gamma', params_shape, tf.float32,
-                initializer=tf.random_normal_initializer(stddev=self._bnorm_init_gamma, dtype=tf.float32))
-            self.variables_list.append(gamma)
-            self.trainable_list.append(gamma)
+    def to_keras(self):
+        i = tf.keras.layers.Input([None, None, 1])
+        model = i
+        for l in self.seq:
+            model = l.to_keras()(model)
+        return Model(i, model)
 
-            local_mean, local_variance = tf.nn.moments(x, [0, 1, 2], name='moments')
 
-            mean, variance = tf.cond(
-                self.falg_train, lambda: (local_mean, local_variance),
-                lambda: (moving_mean, moving_variance))
+class FullConvNetV2(object):
+    """FullConvNet model."""
 
-            self.extra_train.append(moving_mean.assign_sub((1.0 - self._bnorm_decay) * (moving_mean - local_mean)))
-            self.extra_train.append(
-                moving_variance.assign_sub((1.0 - self._bnorm_decay) * (moving_variance - local_variance)))
+    def __init__(self, num_levels=17, padding='SAME'):
+        """FullConvNet constructor."""
 
-            y = tf.nn.batch_normalization(
-                x, mean, variance, None, gamma, self._bnorm_epsilon)
-            y.set_shape(x.get_shape())
-        return y
+        self._actfun = [tf.nn.relu, ] * (num_levels - 1) + [tf.identity, ]
+        self._f_num = [64, ] * (num_levels - 1) + [1, ]
+        self._bnorm = [False, ] + [True, ] * (num_levels - 2) + [False, ]
 
-    def _bias(self, x, name='bias'):
-        """Bias term."""
-        with tf.variable_scope(name):
-            params_shape = [x.get_shape()[-1]]
-            beta = tf.get_variable(
-                'beta', params_shape, tf.float32,
-                initializer=tf.constant_initializer(0.0, dtype=tf.float32))
-            self.variables_list.append(beta)
-            self.trainable_list.append(beta)
-            y = x + beta
-        return y
+        inp = tf.keras.layers.Input([None, None, 1])
+        model = inp
 
-    def _conv(self, x, filter_size, out_filters, stride, name='conv'):
-        """Convolution."""
-        with tf.variable_scope(name):
-            in_filters = int(x.get_shape()[-1])
-            n = filter_size * filter_size * np.maximum(in_filters, out_filters)
-            kernel = tf.get_variable(
-                'weights', [filter_size, filter_size, in_filters, out_filters],
-                tf.float32, initializer=tf.random_normal_initializer(
-                    stddev=np.sqrt(2.0 / n), dtype=tf.float32))
-            self.variables_list.append(kernel)
-            self.trainable_list.append(kernel)
-            self.decay_list.append(kernel)
-            y = tf.nn.conv2d(x, kernel, [1, stride, stride, 1], padding=self.padding)
-        return y
+        for i in range(num_levels):
+            model = Conv2D(self._f_num[i], 3, padding=padding, use_bias=False)(model)
+            if self._bnorm[i]:
+                model = BatchNormalization(epsilon=1e-5)(model)
+            model = BiasLayer()(model)
+            model = Activation(self._actfun[i])(model)
+
+        self.model = Model(inp, model)
+        self.model.summary()
+
+
+
 
 
 class NoiseprintEngine:
-    tf.reset_default_graph()
-    x_data = tf.placeholder(tf.float32, [1, None, None, 1], name="x_data")
-    net = FullConvNet(x_data, 0.9, tf.constant(False), num_levels=17)
-    saver = tf.train.Saver(net.variables_list)
+    net = FullConvNet()
+    saver = tf1.train.Saver(net.variables_list)
     checkpoint_template = os.path.join(os.path.dirname(__file__), './noiseprint/net_jpg%d/model')
-    configSess = tf.ConfigProto()
+    save_p = os.path.join(os.path.dirname(__file__), './noiseprint_V2/net_jpg%d/')
+    configSess = tf1.ConfigProto()
     configSess.gpu_options.allow_growth = True
     slide = 1024  # 3072
     largeLimit = 1050000  # 9437184
@@ -125,8 +235,9 @@ class NoiseprintEngine:
     def __init__(self, quality=101):
         self.quality = quality
         self.model = self.net
-        self.session = None
         self.loaded_quality = None
+        self.session = tf1.Session()
+        self.load_session(quality)
 
     def load_session(self, quality):
         log("Setting quality to %d " % quality)
@@ -138,15 +249,20 @@ class NoiseprintEngine:
             quality = 101
         log("Reloading checkpoint %d " % quality)
         checkpoint = self.checkpoint_template % quality
+        s_c = self.save_p % quality
+
         self.saver.restore(self.session, checkpoint)
+
+        k_model = self.model.to_keras()
+
+        k_model.save_weights(s_c)
+        # k_model.load_weights(s_c)
+
+        self.k_model = k_model
+        # exit(1)
         self.loaded_quality = quality
 
-    def ensure_open(self):
-        if self.loaded_quality is None:
-            self.open()
-
-    def predict_large(self, img):
-        self.ensure_open()
+    def _predict_large(self, img):
         res = np.zeros((img.shape[0], img.shape[1]), np.float32)
         for index0 in range(0, img.shape[0], self.slide):
             index0start = index0 - self.overlap
@@ -157,7 +273,7 @@ class NoiseprintEngine:
                 index1end = index1 + self.slide + self.overlap
                 clip = img[max(index0start, 0): min(index0end, img.shape[0]), \
                        max(index1start, 0): min(index1end, img.shape[1])]
-                resB = self.session.run(self.model.output, feed_dict={self.x_data: clip[np.newaxis, :, :, np.newaxis]})
+                resB = self.model.run(clip[np.newaxis, :, :, np.newaxis])
                 resB = np.squeeze(resB)
 
                 if index0 > 0:
@@ -170,38 +286,21 @@ class NoiseprintEngine:
                 index1: min(index1 + self.slide, res.shape[1])] = resB
         return res
 
-    def predict_small(self, img):
-        self.ensure_open()
-        res = self.session.run(self.model.output, feed_dict={self.x_data: img[np.newaxis, :, :, np.newaxis]})
+    def _predict_small(self, img):
+        res = self.model.run(img[np.newaxis, :, :, np.newaxis])
         return np.squeeze(res)
 
     def predict(self, img):
         if img.shape[0] * img.shape[1] > self.largeLimit:
-            return self.predict_large(img)
+            return self._predict_large(img)
         else:
-            return self.predict_small(img)
-
-    def open(self, quality=None):
-        self.session = tf.Session(config=self.configSess)
-        if quality is None:
-            quality = self.quality
-        log("Opening noiseprint session with quality %d" % quality)
-        self.quality = quality
-        self.load_session(quality)
-
-    def close(self):
-        self.loaded_quality = None
-        if self.session is not None:
-            self.session.close()
-        self.session = None
-        log("Closing noiseprint session")
+            return self._predict_small(img)
 
     def __enter__(self):
-        self.open()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        pass
 
 
 def gen_noiseprint(image, quality=None):
@@ -213,7 +312,15 @@ def gen_noiseprint(image, quality=None):
         if quality is None:
             quality = 101
     with NoiseprintEngine(quality) as engine:
-        return engine.predict(image)
+        return engine.predict(image), engine.k_model.predict(image[tf.newaxis, ..., tf.newaxis])
+
+
+def load_all():
+    engine = NoiseprintEngine()
+    for i in range(50, 102):
+        engine.load_session(i)
+
+load_all()
 
 
 def normalize_noiseprint(noiseprint, margin=34):

@@ -20,10 +20,11 @@ def get_quantization_table():
     return lambda path: tf.numpy_function(apply, [path], None)
 
 
-def block_dct():
+def block_dct(add_padding=False):
     def apply(x):
         tensor = tf.numpy_function(
-            lambda y_cb_cr_data: blockwise_dct_matrix((y_cb_cr_data[..., 0]).astype(np.int16) - 128), [x], tf.double)
+            lambda y_cb_cr_data: blockwise_dct_matrix((y_cb_cr_data[..., 0]).astype(np.int16) - 128,
+                                                      add_padding=add_padding), [x], tf.double)
         tensor.set_shape((None, None, 8, 8))
         return tensor
 

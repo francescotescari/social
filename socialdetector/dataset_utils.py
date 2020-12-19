@@ -86,3 +86,20 @@ def glob_dataset(pattern, recursive=True):
 def path_glob_dataset(path, pattern, recursive=True):
     return Dataset.from_generator(lambda: path_glob_iterator(path, pattern, recursive=recursive),
                                   output_types=tf.string)
+
+
+def tf_assure_blockable(tensor, block_size=(8, 8)):
+    shp = tf.shape(tensor)
+    if len(shp) == 3:
+        w = shp[0]
+        h = shp[1]
+    elif len(shp) == 4:
+        w = shp[1]
+        h = shp[2]
+    else:
+        raise ValueError("Tensor shape should be [w,h,c] or [b,w,h,c]")
+
+    w -= w % block_size[0]
+    h -= h % block_size[1]
+
+    return tf.image.crop_to_bounding_box(tensor, 0, 0, w, h)
