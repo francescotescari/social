@@ -1,27 +1,18 @@
+from PIL import Image
 from tensorflow.python.keras.layers import Conv2D, BatchNormalization, Activation
-from tensorflow.python.training.tracking.data_structures import NoDependency
 
-import socialdetector.tf_options_setter
 import os
 import tensorflow as tf
 import numpy as np
 from tensorflow.python.keras.models import Model
 
-from socialdetector.utility import log, jpeg_qtableinv, imread2f_pil
+from socialdetector.utility import jpeg_qtableinv
 
 
 class BiasLayer(tf.keras.layers.Layer):
 
-    def __init__(self, initial_value=None, **kwargs):
-        super(BiasLayer, self).__init__(**kwargs)
-        self.val = initial_value
-
     def build(self, input_shape):
-        if self.val is None:
-            self.bias = self.add_weight('bias', shape=input_shape[-1], initializer="zeros")
-        else:
-            self.bias = self.add_weight('bias', shape=input_shape[-1],
-                                        initializer=lambda shape, dtype: tf.cast(self.val, dtype=dtype))
+        self.bias = self.add_weight('bias', shape=input_shape[-1], initializer="zeros")
 
     @tf.function
     def call(self, inputs, training=None):
@@ -30,7 +21,6 @@ class BiasLayer(tf.keras.layers.Layer):
 
 def _FullConvNetV2(num_levels=17, padding='SAME'):
     """FullConvNet model."""
-
     activation_fun = [tf.nn.relu, ] * (num_levels - 1) + [tf.identity, ]
     filters_num = [64, ] * (num_levels - 1) + [1, ]
     batch_norm = [False, ] + [True, ] * (num_levels - 2) + [False, ]
@@ -49,29 +39,34 @@ def _FullConvNetV2(num_levels=17, padding='SAME'):
 
 
 class NoiseprintEngineV2:
-    model = _FullConvNetV2()
     save_path = os.path.join(os.path.dirname(__file__), './noiseprint_V2/net_jpg%d/')
-    configSess = tf.compat.v1.ConfigProto()
-    configSess.gpu_options.allow_growth = True
     slide = 1024  # 3072
     largeLimit = 1050000  # 9437184
     overlap = 34
 
     def __init__(self, quality=None):
+        self.model = _FullConvNetV2()
+        configSess = tf.compat.v1.ConfigProto()
+        configSess.gpu_options.allow_growth = True
         self.quality = quality
         self.loaded_quality = None
         if quality is not None:
             self.load_session(quality)
 
     def load_session(self, quality):
-        log("Setting quality to %d " % quality)
+        # log("Setting quality to %d " % quality)
         quality = min(max(quality, 51), 101)
         if quality == self.loaded_quality:
             return
-        log("Reloading checkpoint %d " % quality)
+        print("Loading checkpoint %d " % quality)
         checkpoint = self.save_path % quality
         self.model.load_weights(checkpoint)
         self.loaded_quality = quality
+
+    @tf.function(experimental_relax_shapes=True,
+                 input_signature=[tf.TensorSpec(shape=(1, None, None, 1), dtype=tf.float32)])
+    def _predict_small(self, img):
+        return self.model(img)
 
     def _predict_large(self, img):
         res = np.zeros((img.shape[0], img.shape[1]), np.float32)
@@ -97,25 +92,18 @@ class NoiseprintEngineV2:
                 index1: min(index1 + self.slide, res.shape[1])] = resB
         return res
 
-    def _predict_small(self, img):
-        return self.model.predict(img)
-
     def predict(self, img):
         if img.shape[0] * img.shape[1] > self.largeLimit:
             return self._predict_large(img)
         else:
-            return tf.squeeze(self._predict_small(img[np.newaxis, :, :, np.newaxis]))
-
-    @tf.function
-    def predict_graphed(self, img):
-        return self.predict(img)
+            return tf.squeeze(self._predict_small(tf.convert_to_tensor(img[np.newaxis, :, :, np.newaxis]))).numpy()
 
 
 def gen_noiseprint(image, quality=None):
     if isinstance(image, str):
         if quality is None:
             quality = jpeg_qtableinv(image)
-        image = imread2f_pil(image, channel=1)[0]
+        image = np.asarray(Image.open(image).convert("YCbCr"))[..., 0].astype(np.float32) / 256.0
     else:
         if quality is None:
             quality = 101

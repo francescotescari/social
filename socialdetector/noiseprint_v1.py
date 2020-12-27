@@ -1,4 +1,6 @@
 import os
+from time import time
+
 import tensorflow.compat.v1 as tf
 import numpy as np
 
@@ -217,11 +219,10 @@ def gen_noiseprint(image, quality=None):
     with NoiseprintEngine(quality) as engine:
         return engine.predict(image)
 
-
-no = gen_noiseprint(r"../tiny.jpg", 57)
-print(no)
-
 def normalize_noiseprint(noiseprint, margin=34):
     v_min = np.min(noiseprint[margin:-margin, margin:-margin])
     v_max = np.max(noiseprint[margin:-margin, margin:-margin])
     return ((noiseprint - v_min) / (v_max - v_min)).clip(0, 1)
+
+
+

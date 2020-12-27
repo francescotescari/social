@@ -3,8 +3,10 @@ from time import time
 
 from tensorflow.python.data import Dataset
 from tensorflow.python.keras.optimizer_v2.adam import Adam
+from tensorflow.python.keras.optimizer_v2.nadam import Nadam
+from tensorflow_datasets.core import DatasetBuilder
 
-from socialdetector.dataset_generator import full_dataset
+from socialdetector.dataset_generator import full_dataset, tdfs_encode, Metrics
 from socialdetector.dataset_utils import datasets_interleave, tf_print
 from socialdetector.dl.model import GenericModel
 from socialdetector.utility import is_listing
@@ -95,22 +97,33 @@ class DatasetConstructor:
         res = self._split(dataset_spec, splitter)
         return [res[i].batch(self.batch_size[i]) if self.batch_size[i] > 0 else res[i] for i in range(3)]
 
+    def split_from_builder(self, dataset_builder: DatasetBuilder):
+        datasets = dataset_builder.as_dataset()
+        names = ['train', 'validation', 'test']
+        encoded = [tdfs_encode(datasets[name], noiseprint=self.noiseprint, dct_encoding=self.dct_encoding,
+                               shuffle=(self.shuffle if name == 'train' else 0)) for name in names]
+        # encoded = [ds.shuffle() for ds in encoded]
+        return [encoded[i].batch(self.batch_size[i]) if self.batch_size[i] > 0 else encoded[i] for i in range(3)]
+
 
 def require_not_none(var, msg):
     if var is None:
         raise ValueError(msg)
 
 
+
+
 class Experiment:
     loss_function = 'categorical_crossentropy'
     metric_functions = ['accuracy']
-    optimizer = Adam(lr=0.001)
-    steps_per_epoch = 0
+    optimizer = Nadam(lr=0.0001)
+    steps_per_epoch = 1000
 
     repeat_train = True
     ds_splitter = None
     model_type = None
     dataset_spec: DatasetSpec = None
+    dataset_builder = None
 
     def __repr__(self):
         raise NotImplementedError
@@ -147,7 +160,9 @@ class Experiment:
         train = dss[0]
         if self.repeat_train:
             train = train.repeat()
-        self.model.train_with_generator(train, epochs=20000, validation_data=dss[1].cache(), **self.train_config)
+        val = dss[1].cache()
+        self.model.registered_callbacks.append(Metrics(val))
+        self.model.train_with_generator(train, epochs=20000, validation_data=val.batch(256), **self.train_config)
 
     def evaluate(self):
         self._assure_model_ready()
@@ -166,12 +181,15 @@ class Experiment:
         print("Model %s ready" % self.model.id)
 
     def _assure_generators_ready(self):
-        require_not_none(self.dataset_spec, "No dataset for this experiment")
-        require_not_none(self.ds_splitter,"No splitter for the dataset")
         if self.split_ds is not None:
             return
-        print("Generating train, validation and test datasets...")
-        self.split_ds = list(self.ds_constructor.get_split(self.dataset_spec, self.ds_splitter))
+        if self.dataset_builder is None:
+            require_not_none(self.dataset_spec, "No dataset for this experiment")
+            require_not_none(self.ds_splitter, "No splitter for the dataset")
+            print("Generating train, validation and test datasets...")
+            self.split_ds = list(self.ds_constructor.get_split(self.dataset_spec, self.ds_splitter))
+        else:
+            self.split_ds = list(self.ds_constructor.split_from_builder(self.dataset_builder))
 
 
 empty_dataset = Dataset.from_tensors([])

@@ -5,14 +5,13 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from PIL.JpegImagePlugin import convert_dict_qtables
-from tensorflow.python.data import Dataset
 
 
 def log(*args, **kwargs):
     print("[SD]", *args, **kwargs)
 
 
-def jpeg_qtableinv(stream, tnum=0, force_baseline=None):
+def jpeg_quality_of(image, tnum=0, force_baseline=None):
     assert tnum == 0 or tnum == 1, 'Table number must be 0 or 1'
 
     if force_baseline is None:
@@ -22,7 +21,7 @@ def jpeg_qtableinv(stream, tnum=0, force_baseline=None):
     else:
         th_high = 255
 
-    h = np.asarray(convert_dict_qtables(Image.open(stream).quantization)[tnum]).reshape((8, 8))
+    h = np.asarray(convert_dict_qtables(image.quantization)[tnum]).reshape((8, 8))
 
     if tnum == 0:
         # This is table 0 (the luminance table):
@@ -67,8 +66,11 @@ def jpeg_qtableinv(stream, tnum=0, force_baseline=None):
     return s
 
 
-def imread2f_pil(stream, channel=1, dtype=np.float32):
-    img = Image.open(stream)
+def jpeg_qtableinv(stream, tnum=0, force_baseline=None):
+    return jpeg_quality_of(Image.open(stream), tnum=tnum, force_baseline=force_baseline)
+
+
+def image_to_channels(img, channel=1, dtype=np.float32):
     mode = img.mode
 
     if channel == 3:
@@ -84,6 +86,10 @@ def imread2f_pil(stream, channel=1, dtype=np.float32):
     else:
         img = np.asarray(img).astype(dtype) / 256.0
     return img, mode
+
+
+def imread2f_pil(stream, channel=1, dtype=np.float32):
+    return image_to_channels(Image.open(stream), channel=channel, dtype=dtype)
 
 
 def imread_mode(filename, mode="RGB", dtype=np.float32):
@@ -125,17 +131,16 @@ class _TreeIterator:
         return self._next_i(self.last_i)
 
 
-class _MapIterator:
-
-    def __init__(self, it, map_fn):
-        self.it = it
-        self.map_fn = map_fn
-
-    def __next__(self):
-        return self.map_fn(next(self.it))
-
-    def __iter__(self):
-        return self
+def interleave_generators(gens):
+    gens = list(gens)
+    while True:
+        for gen in gens:
+            try:
+                yield next(gen)
+            except StopIteration:
+                gens.remove(gen)
+                if len(gens) == 0:
+                    return
 
 
 def count_iterator(iterator):
@@ -143,7 +148,7 @@ def count_iterator(iterator):
     try:
         while True:
             next(iterator)
-            i+=1
+            i += 1
     except StopIteration:
         pass
     return i
@@ -152,7 +157,7 @@ def count_iterator(iterator):
 def path_glob_iterator(path, pattern, recursive=True):
     p = Path(path)
     it = p.rglob(pattern) if recursive else p.glob(pattern)
-    return _MapIterator(it, lambda x: str(x))
+    return map(lambda x: str(x), it)
 
 
 def glob_iterator(pattern, recursive=True):
@@ -200,3 +205,22 @@ def isiterable(o):
 
 def is_listing(o):
     return isinstance(o, list) or isinstance(o, tuple)
+
+
+def split_filters(generator, *filters):
+    filters = list(filters)
+    res = [[] for _ in filters] + [[]]
+    tot = len(res)-1
+    for entry in generator:
+        i = 0
+        for fil in filters:
+            if fil(entry):
+                res[i].append(entry)
+                break
+            i += 1
+        if i == tot:
+            res[-1].append(entry)
+    return res
+
+
+print(split_filters([0, 1, 2, 3, 4, 5], lambda x: x % 2 == 0))

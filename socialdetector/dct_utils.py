@@ -57,8 +57,10 @@ def to_block_array(img, block_size=standard_block_size):
 def to_block_matrix(img, block_size=standard_block_size):
     if img.shape[0] % block_size != 0 or img.shape[1] % block_size != 0:
         raise ValueError("Invalid img shape and block size: {} - {}".format(img.shape, block_size))
-    return np.array([[img[x:x + 8, y:y + 8] for x in range(0, img.shape[0], block_size)] for y in
-                     range(0, img.shape[1], block_size)])
+    return np.array([
+        [img[x:x + 8, y:y + 8] for y in range(0, img.shape[1], block_size)]
+        for x in range(0, img.shape[0], block_size)
+    ])
 
 
 def blockwise_dct_matrix(img, add_padding=True, block_size=standard_block_size):
