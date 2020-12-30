@@ -77,19 +77,19 @@ class NoiseprintEngineV2:
             for index1 in range(0, img.shape[1], self.slide):
                 index1start = index1 - self.overlap
                 index1end = index1 + self.slide + self.overlap
-                clip = img[max(index0start, 0): min(index0end, img.shape[0]), \
+                clip = img[max(index0start, 0): min(index0end, img.shape[0]),
                        max(index1start, 0): min(index1end, img.shape[1])]
-                resB = self._predict_small(clip[np.newaxis, :, :, np.newaxis])
-                resB = np.squeeze(resB)
+                res_chunk = self._predict_small(clip[np.newaxis, :, :, np.newaxis])
+                res_chunk = np.squeeze(res_chunk)
 
                 if index0 > 0:
-                    resB = resB[self.overlap:, :]
+                    res_chunk = res_chunk[self.overlap:, :]
                 if index1 > 0:
-                    resB = resB[:, self.overlap:]
-                resB = resB[:min(self.slide, resB.shape[0]), :min(self.slide, resB.shape[1])]
+                    res_chunk = res_chunk[:, self.overlap:]
+                res_chunk = res_chunk[:min(self.slide, res_chunk.shape[0]), :min(self.slide, res_chunk.shape[1])]
 
-                res[index0: min(index0 + self.slide, res.shape[0]), \
-                index1: min(index1 + self.slide, res.shape[1])] = resB
+                res[index0: min(index0 + self.slide, res.shape[0]),
+                index1: min(index1 + self.slide, res.shape[1])] = res_chunk
         return res
 
     def predict(self, img):

@@ -13,7 +13,7 @@ dataset.download_and_prepare()
 # IpLabThree().download_and_prepare()
 
 
-experiment = MyJpeg()
+experiment = ExpMyJpeg()
 # name
 experiment.extra = "long"
 experiment.batch_size = 256

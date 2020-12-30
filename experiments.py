@@ -1,14 +1,9 @@
 from abc import ABC
 
-import numpy as np
-from tensorflow.python.keras.callbacks import Callback
-from tensorflow.python.keras.optimizer_v2.adam import Adam
-from tensorflow.python.ops.confusion_matrix import confusion_matrix
-
 from socialdetector.dataset_generator import encode_coefficients_my, encode_coefficients_paper
 from socialdetector.dl.jpeg_cnn import MyCNNJpeg, PaperCNNModel
 from socialdetector.dl.noiseprint_cnn import NoiseprintModel, FullModel
-from socialdetector.experiment import Experiment, FixedSizeSplitter
+from socialdetector.experiment import Experiment
 
 
 class LocalExperiment(Experiment, ABC):
@@ -33,25 +28,13 @@ class StdLocalExperiment(LocalExperiment):
             return self.name
         return self.__class__.__name__.lower()
 
-
-
     def __init__(self, noiseprint=False, dct_encoding=None):
         super().__init__()
-        self.ds_constructor.shuffle = 2000
-        self.ds_constructor.seed = 12321
         self.ds_constructor.dct_encoding = dct_encoding
         self.ds_constructor.noiseprint = noiseprint
 
 
-    def get_datasets(self):
-
-        if self.ds_splitter is None and self.dataset_spec is not None:
-            size = self.dataset_spec.files_number
-            self.ds_splitter = FixedSizeSplitter(size // 10, size // 10, shuffle=size * 2)
-        return super().get_datasets()
-
-
-class NoiseprintOnly(StdLocalExperiment):
+class ExpNoiseprint(StdLocalExperiment):
     model_type = NoiseprintModel
     name = "noiseprint_only"
 
@@ -59,16 +42,15 @@ class NoiseprintOnly(StdLocalExperiment):
         super().__init__(noiseprint=True)
 
 
-class MyJpeg(StdLocalExperiment):
+class ExpMyJpeg(StdLocalExperiment):
     model_type = MyCNNJpeg
-    optimizer = Adam(lr=0.00005)
     name = "my_jpeg"
 
     def __init__(self):
         super().__init__(dct_encoding=encode_coefficients_my)
 
 
-class JpegPaper(StdLocalExperiment):
+class ExpPaperJpeg(StdLocalExperiment):
     model_type = PaperCNNModel
     name = "jpeg_paper"
 
@@ -76,7 +58,7 @@ class JpegPaper(StdLocalExperiment):
         super().__init__(dct_encoding=encode_coefficients_paper)
 
 
-class TwoStreams(StdLocalExperiment):
+class ExpTwoStreams(StdLocalExperiment):
     model_type = FullModel
     name = "two_streams"
 

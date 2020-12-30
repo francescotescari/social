@@ -1,9 +1,7 @@
 import tensorflow as tf
-import os
-import numpy as np
 from tensorflow.python.data import Dataset
 
-from socialdetector.utility import imread_mode, is_listing, glob_iterator, path_glob_iterator
+from socialdetector.utility import is_listing, glob_iterator, path_glob_iterator
 
 
 def print_ds(ds):
@@ -34,30 +32,12 @@ def split_image_fn(tile_size, strides=None):
 
 def tf_print(*args):
     tf.print(*args)
-    #tf.numpy_function(lambda x: print(x), args, [], name="tf_print_py")
     return args[0]
 
+
 def str_endswith(end_regex):
-    rg = ".*"+end_regex+"$"
+    rg = ".*" + end_regex + "$"
     return lambda x: tf.strings.regex_full_match(x, rg, name="tf_ends_with")
-
-
-def path_bind(dst_path: str, origin_dir: str):
-    def apply(path):
-        path = path.decode("utf-8")
-        dir_path, name = os.path.split(os.path.abspath(path))
-        relative_dir_path = os.path.relpath(dir_path, origin_dir)
-        return os.path.join(dst_path, relative_dir_path, name)
-
-    return lambda path: tf.numpy_function(apply, [path], tf.string, name="path_bind_py")
-
-
-def path_append(append: str):
-    return lambda path: path + append
-
-
-def load_image(mode="RGB", dtype=np.uint8):
-    return lambda x: tf.numpy_function(lambda path: imread_mode(path, mode, dtype), [x], dtype, name="load_image_py")
 
 
 def datasets_interleave(datasets, block_length=None, cycle_length=None):
@@ -86,20 +66,3 @@ def glob_dataset(pattern, recursive=True):
 def path_glob_dataset(path, pattern, recursive=True):
     return Dataset.from_generator(lambda: path_glob_iterator(path, pattern, recursive=recursive),
                                   output_types=tf.string)
-
-
-def tf_assure_blockable(tensor, block_size=(8, 8)):
-    shp = tf.shape(tensor)
-    if len(shp) == 3:
-        w = shp[0]
-        h = shp[1]
-    elif len(shp) == 4:
-        w = shp[1]
-        h = shp[2]
-    else:
-        raise ValueError("Tensor shape should be [w,h,c] or [b,w,h,c]")
-
-    w -= w % block_size[0]
-    h -= h % block_size[1]
-
-    return tf.image.crop_to_bounding_box(tensor, 0, 0, w, h)

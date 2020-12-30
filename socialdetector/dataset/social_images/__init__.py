@@ -1,3 +1,3 @@
 """social_images dataset."""
 
-from .social_images import UcidSocial, UcidPublic
+from .social_images import UcidSocial, UcidPublic, IpLabThree, IpLabSeven
