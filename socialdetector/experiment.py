@@ -6,9 +6,11 @@ from tensorflow.python.keras.optimizer_v2.adam import Adam
 from tensorflow.python.keras.optimizer_v2.nadam import Nadam
 from tensorflow_datasets.core import DatasetBuilder
 
+from socialdetector.dataset.social_images.social_images import SocialImages
 from socialdetector.dataset_generator import full_dataset, tdfs_encode, Metrics
-from socialdetector.dataset_utils import datasets_interleave, tf_print
+from socialdetector.dataset_utils import datasets_interleave, tf_print, datasets_concatenate
 from socialdetector.dl.model import GenericModel
+from socialdetector.ds_split import DsSplit
 from socialdetector.utility import is_listing
 
 
@@ -44,13 +46,14 @@ class DatasetSplitter:
 
 class DatasetConstructor:
     batch_size = [256, 256, 256]
-    shuffle = 2000
+    shuffle = 5000
     seed = round(time())
 
     noiseprint = False
     dct_encoding = None
     same_seed = False
     print_log = print
+    _default_steps = 1000
 
     def _split(self, dataset_spec, splitter: DatasetSplitter):
         noiseprint_path, origin_path = (None, None) if not self.noiseprint else (dataset_spec.noiseprint_path,
@@ -97,13 +100,19 @@ class DatasetConstructor:
         res = self._split(dataset_spec, splitter)
         return [res[i].batch(self.batch_size[i]) if self.batch_size[i] > 0 else res[i] for i in range(3)]
 
-    def split_from_builder(self, dataset_builder: DatasetBuilder):
-        datasets = dataset_builder.as_dataset()
-        names = ['train', 'validation', 'test']
-        encoded = [tdfs_encode(datasets[name], noiseprint=self.noiseprint, dct_encoding=self.dct_encoding,
-                               shuffle=(self.shuffle if name == 'train' else 0)) for name in names]
-        # encoded = [ds.shuffle() for ds in encoded]
-        return [encoded[i].batch(self.batch_size[i]) if self.batch_size[i] > 0 else encoded[i] for i in range(3)]
+    def split_from_builder(self, dataset_builder: SocialImages):
+        splitter = DsSplit(noiseprint=self.noiseprint, dct_encoding=self.dct_encoding, seed=self.seed,
+                           shuffle_train=self.shuffle)
+
+        res = splitter.split_datasets(dataset_builder)
+        self._default_steps = splitter.min_chunks // 4
+        if self.batch_size[0] > 0:
+            self._default_steps = self._default_steps // self.batch_size[0]
+        return [res[i].batch(self.batch_size[i]) if i == 0 else res[i] for i in range(3)]
+
+    @property
+    def default_steps(self):
+        return self._default_steps
 
 
 def require_not_none(var, msg):
@@ -111,19 +120,20 @@ def require_not_none(var, msg):
         raise ValueError(msg)
 
 
-
-
 class Experiment:
     loss_function = 'categorical_crossentropy'
     metric_functions = ['accuracy']
     optimizer = Nadam(lr=0.0001)
-    steps_per_epoch = 1000
+    steps_per_epoch = None
 
     repeat_train = True
     ds_splitter = None
     model_type = None
     dataset_spec: DatasetSpec = None
-    dataset_builder = None
+    dataset_builder: SocialImages = None
+    extra = None
+    batch_size = 512
+
 
     def __repr__(self):
         raise NotImplementedError
@@ -136,6 +146,9 @@ class Experiment:
         self.split_ds = None
 
     def _prepare_configs(self):
+        if self.steps_per_epoch is None:
+            self.steps_per_epoch = self.ds_constructor.default_steps
+
         self.compile_config.update({
             'loss_function': self.loss_function,
             'metric_functions': self.metric_functions,
@@ -155,8 +168,8 @@ class Experiment:
         return self.split_ds
 
     def train(self):
-        self._assure_model_ready()
         dss = self.get_datasets()
+        self._assure_model_ready()
         train = dss[0]
         if self.repeat_train:
             train = train.repeat()
@@ -175,14 +188,18 @@ class Experiment:
             print("Compiling new initialized model %r" % self.model_type)
             require_not_none(self.model_type, "No model type specified")
             self.model: GenericModel = self.model_type()
+            if self.dataset_builder is not None:
+                self.model.classes = len(self.dataset_builder.labels)
             self.model.build_model()
             self.model.compile(**self.compile_config)
-        self.model.id = os.path.join(repr(self), repr(self.dataset_spec))
+        self.model.id = os.path.join(repr(self), repr(self.dataset_spec) if self.dataset_builder is None else self.dataset_builder.name)
+        self.model.desc = self.extra
         print("Model %s ready" % self.model.id)
 
     def _assure_generators_ready(self):
         if self.split_ds is not None:
             return
+        self.ds_constructor.batch_size = [self.batch_size, self.batch_size, self.batch_size]
         if self.dataset_builder is None:
             require_not_none(self.dataset_spec, "No dataset for this experiment")
             require_not_none(self.ds_splitter, "No splitter for the dataset")

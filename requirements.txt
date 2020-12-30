@@ -1,0 +1,7 @@
+tensorflow_datasets==4.1.0
+imagesize==1.2.0
+tensorflow==2.3.1
+tf_siren==0.0.5
+scipy==1.5.4
+scikit_image==0.18.1
+Pillow==8.0.1

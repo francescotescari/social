@@ -1,10 +1,13 @@
 from abc import ABC
 
+import numpy as np
+from tensorflow.python.keras.callbacks import Callback
 from tensorflow.python.keras.optimizer_v2.adam import Adam
+from tensorflow.python.ops.confusion_matrix import confusion_matrix
 
 from socialdetector.dataset_generator import encode_coefficients_my, encode_coefficients_paper
 from socialdetector.dl.jpeg_cnn import MyCNNJpeg, PaperCNNModel
-from socialdetector.dl.noiseprint_cnn import NoiseprintModel
+from socialdetector.dl.noiseprint_cnn import NoiseprintModel, FullModel
 from socialdetector.experiment import Experiment, FixedSizeSplitter
 
 
@@ -30,7 +33,7 @@ class StdLocalExperiment(LocalExperiment):
             return self.name
         return self.__class__.__name__.lower()
 
-    batch_size = 256
+
 
     def __init__(self, noiseprint=False, dct_encoding=None):
         super().__init__()
@@ -39,13 +42,9 @@ class StdLocalExperiment(LocalExperiment):
         self.ds_constructor.dct_encoding = dct_encoding
         self.ds_constructor.noiseprint = noiseprint
 
-    def _prepare_configs(self):
-        if self.dataset_spec is not None:
-            self.steps_per_epoch = round(self.dataset_spec.estimated_batches(self.batch_size) * 0.8 / 2)
-        return super()._prepare_configs()
 
     def get_datasets(self):
-        self.ds_constructor.batch_size = [self.batch_size, self.batch_size, self.batch_size]
+
         if self.ds_splitter is None and self.dataset_spec is not None:
             size = self.dataset_spec.files_number
             self.ds_splitter = FixedSizeSplitter(size // 10, size // 10, shuffle=size * 2)
@@ -75,3 +74,11 @@ class JpegPaper(StdLocalExperiment):
 
     def __init__(self):
         super().__init__(dct_encoding=encode_coefficients_paper)
+
+
+class TwoStreams(StdLocalExperiment):
+    model_type = FullModel
+    name = "two_streams"
+
+    def __init__(self):
+        super().__init__(dct_encoding=encode_coefficients_my, noiseprint=True)

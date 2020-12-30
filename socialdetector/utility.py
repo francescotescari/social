@@ -221,6 +221,3 @@ def split_filters(generator, *filters):
         if i == tot:
             res[-1].append(entry)
     return res
-
-
-print(split_filters([0, 1, 2, 3, 4, 5], lambda x: x % 2 == 0))

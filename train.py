@@ -1,19 +1,25 @@
-import socialdetector.tf_options_setter
-from data_loader import ucid_social, ucid_public, iplab_three
-from experiments import *
-from socialdetector.dataset_utils import str_endswith
-from socialdetector.experiment import FilterSplitter
+from tensorflow.python.keras.optimizer_v2.nadam import Nadam
 
-path = "./history/noiseprintonly_1607693319/e08-l0.1334-b1.4151.h5"
+from experiments import *
+from socialdetector.dataset.social_images.social_images import UcidPublic, UcidSocial, IpLabThree, IpLabSeven
+
+# path = "./history/noiseprintonly_1607693319/e08-l0.1334-b1.4151.h5"python -
 path = None
 
+dataset = UcidPublic()
+dataset.download_and_prepare()
+# UcidSocial().download_and_prepare()
+# UcidPublic().download_and_prepare()
+# IpLabThree().download_and_prepare()
+
+
 experiment = MyJpeg()
-experiment.dataset_spec = ucid_public
-experiment.repeat_train = True
-experiment.ds_splitter = FilterSplitter(str_endswith("1\\.jpg"), str_endswith("2\\.jpg"))
-"""val = experiment.get_datasets()[1]
-print(next(val.as_numpy_iterator()))
-print(next(val.as_numpy_iterator()))"""
+# name
+experiment.extra = "long"
+experiment.batch_size = 256
+experiment.dataset_builder = dataset
+experiment.optimizer = Nadam(0.0001)
+# experiment.steps_per_epoch = 100
+
+
 experiment.load_from(path).train()
-
-

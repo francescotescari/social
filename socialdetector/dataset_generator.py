@@ -191,57 +191,49 @@ def tdfs_encode(dataset: Dataset, labels=3, noiseprint=False, dct_encoding=None,
     return ds
 
 
-class Metrics2(Callback):
-    def __init__(self, val_generator):
-        super().__init__()
-        self.val_data = list(map(lambda x: x[0], val_generator)), list(map(lambda x: x[1], val_generator))
-
-    def on_train_begin(self, logs={}):
-        self._data = []
-
-    def on_epoch_end(self, batch, logs={}):
-        x_test, y_test = self.val_data[0][0], self.val_data[1][0]
-
-        y_predict = np.asarray(self.model.predict(x_test))
-
-        true = np.argmax(y_test, axis=1)
-        pred = np.argmax(y_predict, axis=1)
-
-        cm = confusion_matrix(true, pred)
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        self._data.append({
-            'classLevelaccuracy': cm.diagonal(),
-        })
-        return
-
-    def get_data(self):
-        return self._data
-
-
 class Metrics(Callback):
 
     def __init__(self, val_generator: Dataset):
         super().__init__()
 
-        def deb(x, y):
-            print(x, y)
-            tf.print(tf.reduce_all(y == [0, 0, 1]))
-            tf.print(y)
-            return x, y
+        def filter_fn(i, n):
+            zeros = [0] * n
+            zeros[i] = 1
+            return lambda x, y: tf.reduce_all(y == zeros)
 
-        self.cls1 = val_generator.filter(lambda x, y: tf.reduce_all(y == [0, 0, 1])).batch(256).cache()
-        self.cls2 = val_generator.filter(lambda x, y: tf.reduce_all(y == [0, 1, 0])).batch(256).cache()
-        self.cls3 = val_generator.filter(lambda x, y: tf.reduce_all(y == [1, 0, 0])).batch(256).cache()
+        label_shape = val_generator.output_shapes[1]
+        n = label_shape[0]
 
-    def on_epoch_end(self, epoch, logs):
+        self.cls = [val_generator.filter(filter_fn(i, n)).batch(128).cache() for i in range(n)]
+
+    def on_epoch_end(self, epoch, logs=None):
         self.model: Model
         # print("L3", len(self.cls3))
         hand = getattr(self.model, "_eval_data_handler", None)
         self.model._eval_data_handler = None
-        print("C1")
-        self.model.evaluate(self.cls1)
-        print("C2")
-        self.model.evaluate(self.cls2)
-        print("C3")
-        self.model.evaluate(self.cls3)
+        for i in range(len(self.cls)):
+            print("Class %d:" % i)
+            self.model.evaluate(self.cls[i])
         self.model._eval_data_handler = hand
+
+
+class ParSine(tf.keras.layers.Layer):
+    def __init__(self, w0: float = 1.0, **kwargs):
+        """
+        Sine activation function with w0 scaling support.
+
+        Args:
+            w0: w0 in the activation step `act(x; w0) = sin(w0 * x)`
+        """
+        super(ParSine, self).__init__(**kwargs)
+        self.w0 = w0
+        self.w1 = 1.0
+        self.p = 0.5
+
+    def call(self, inputs, **kwargs):
+        return self.p * tf.sin(self.w1 * inputs + self.w0) + (1 - self.p) * inputs
+
+    def get_config(self):
+        config = {'w0': self.w0, 'w1': self.w1, 'p': self.p}
+        base_config = super(ParSine, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
