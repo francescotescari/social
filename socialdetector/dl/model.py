@@ -86,6 +86,7 @@ class GenericModel:
         self.model.fit(training_data_generator,
                        use_multiprocessing=True, workers=4, steps_per_epoch=steps_per_epoch,
                        callbacks=self.registered_callbacks, epochs=epochs, verbose=1,
+                       # class_weight={0: 3, 1: 1, 2: 1.3},
                        **({} if validation_data is None else {"validation_data": validation_data}))
 
     def require_model_loaded(self):

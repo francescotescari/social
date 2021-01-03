@@ -99,9 +99,7 @@ class SocialImages(tfds.core.GeneratorBasedBuilder, ABC):
     def features(self):
         return {
             'path': tfds.features.Text(),
-            'chunks': tfds.features.Tensor(shape=(), dtype=tf.int32),
-            #'shape': tfds.features.Tensor(shape=(2,), dtype=tf.int32),
-            'strides': tfds.features.Tensor(shape=(2,), dtype=tf.int8)
+            'shape': tfds.features.Tensor(shape=(2,), dtype=tf.int32)
         }
 
     def _info(self) -> tfds.core.DatasetInfo:
@@ -202,7 +200,6 @@ class SocialImages(tfds.core.GeneratorBasedBuilder, ABC):
         return path, {
             'path': path,
             'shape': image.shape[:2],
-            'strides': block_strides
         }
 
 

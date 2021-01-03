@@ -34,7 +34,7 @@ class Experiment:
     dct_encoding = None
     default_steps = 1000
     shuffle = 5000
-    seed = 999
+    seed = 12321
 
     def __repr__(self):
         raise NotImplementedError

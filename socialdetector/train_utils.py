@@ -30,6 +30,8 @@ class Metrics(Callback):
         self.cls = [val_generator.filter(filter_fn(i, n)).batch(128).cache() for i in range(n)]
 
     def on_epoch_end(self, epoch, logs=None):
+        if epoch % 4 != 0:
+            return
         self.model: Model
         # print("L3", len(self.cls3))
         hand = getattr(self.model, "_eval_data_handler", None)
@@ -62,24 +64,29 @@ def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
     ds = map_pred(ds)
     cce = CategoricalCrossentropy()
 
+    total = 0
     for entry in mapping:
         name, chunks = entry
         name = os.path.basename(name.decode("utf-8"))
         y_pred, y_true = take(ds, chunks)
+        total += len(y_pred)
         # print(name, chunks, "LOSS", cce(y_true, y_pred).numpy())
         for metric in chunk_metrics:
             metric.update_state(np.array(y_true), np.array(y_pred))
-        # y_pred = np.mean(y_pred, axis=0)
+        y_pred2 = np.mean(y_pred, axis=0)
         y_pred = np.argmax(y_pred, axis=1)
         zeros = [0] * n_lab
         ele, count = np.unique(y_pred, return_counts=True)
+        lbm = {i: 0 for i in range(n_lab)}
+        lbm = {**lbm, **{ele[i]: count[i] for i in range(len(ele))}}
+        counts = [int(lbm[i]) for i in range(n_lab)]
         y_pred = ele[max(range(len(ele)), key=lambda x: count[x])]
         zeros[y_pred] = 1
         y_pred = zeros
         y_true = y_true[0]
         if tf.argmax(y_true) != tf.argmax(y_pred):
-            print("WRONG: %s" % name, form(y_pred), form(y_true))
-        print(form(y_pred), form(y_true.numpy()))
+            print("WRONG: %s" % name, form(y_pred2), " | ", counts, " -> ", form(y_true))
+        # print(form(y_pred), form(y_true.numpy()))
         for metric in img_metrics:
             metric.update_state(y_true, y_pred)
 
@@ -91,6 +98,8 @@ def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
     except StopIteration:
         if more:
             print("WARNING: more data then expected (%d)" % more)
+
+    print("Evaluated %d/%d chunks" % (total, total + more))
 
 
 class EvaluateCallback(Callback):

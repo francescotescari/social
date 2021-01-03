@@ -33,7 +33,7 @@ def test_paperjpeg():
 def test_twostream():
     path = "./history/two_streams/ucid_public/1609540064.0625489_std/e230-l0.0450-v0.3101.h5"
     #path = ".\\history\\two_streams\\ucid_social\\1609585022.0416644_std\\e51-l0.0184-v0.0287.h5"
-    path = r".\history\ucid_public\two_streams_999\1609623776.0217886_std\e89-l0.0967-v0.3947.h5"
+    path = r".\history\ucid_public\two_streams_999999\1609679999.9570293_std\e29-l0.2712-v0.3808.h5"
     experiment = ExpTwoStreams()
     experiment.dataset_builder = UcidPublic()
     experiment.load_from(path)

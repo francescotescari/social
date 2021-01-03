@@ -1,3 +1,4 @@
+import math
 import os
 
 from tensorflow.python.data import Dataset
@@ -5,25 +6,32 @@ import tensorflow as tf
 import numpy as np
 from socialdetector.dataset.social_images.social_images import SocialImages, stride_to_str
 from socialdetector.dataset_generator import reshape_block_dct
-from socialdetector.dataset_utils import datasets_concatenate, datasets_interleave
+from socialdetector.dataset_utils import datasets_concatenate, datasets_interleave, split_image_fn
 
 
 class DsSplit:
     tile_size = (64, 64)
 
-    @staticmethod
-    def count_chunks(ds):
+    def chunks_of(self, shape, strides):
+        on_x = (shape[0] - self.tile_size[0]) // strides[0] + 1
+        on_y = (shape[1] - self.tile_size[1]) // strides[1] + 1
+        return on_x * on_y
+
+    def count_chunks(self, ds, strides=None):
+        if strides is None:
+            strides = self.tile_size
         total = 0
         for entry in ds.as_numpy_iterator():
-            total += entry['chunks']
+            total += self.chunks_of(entry['shape'], strides)
         return total
 
-    @staticmethod
-    def steps_until_chunks(ds, target):
+    def steps_until_chunks(self, ds, target, strides=None):
+        if strides is None:
+            strides = self.tile_size
         stop_index = []
         total = 0
         for entry in ds.as_numpy_iterator():
-            chunks = entry['chunks']
+            chunks = self.chunks_of(entry['shape'], strides)
             total += chunks
             if total >= target:
                 chunks = chunks - (total - target)
@@ -48,23 +56,27 @@ class DsSplit:
         self.val_ds = None
         self.tst_ds = None
 
-        self.encode_fn = None
-        if self.dct_encoding is not None:
-            reshape = reshape_block_dct(self.considered_coefficients)
-            encode = self.dct_encoding(self.considered_coefficients)
-            re = tf.function(lambda x: encode(reshape(x)),
-                             input_signature=(tf.TensorSpec((*self.block_tile_size, 64), dtype=tf.float16),))
-            if self.noiseprint:
-                self.encode_fn = lambda d, n: (re(d), n)
-            else:
-                self.encode_fn = re
+    def to_final_dataset(self, label, dataset: Dataset, shuffle: int, max_size=None, max_chunks_per_image=None,
+                         block_strides=None):
+        """def dat_dbg(d, fn):
 
-    def to_final_dataset(self, label, dataset: Dataset, shuffle: int, max_size=None, max_chunks_per_image=None):
-        flat_fn = self.get_chunks(max_chunks_per_image)
-        ds = dataset.flat_map(flat_fn)
-        if self.encode_fn is not None:
-            ds = ds.map(self.encode_fn, num_parallel_calls=self.parallel,
-                        deterministic=(self.deterministic and shuffle > 0))
+            def ap(x):
+                print(x)
+                fn(x)
+                return x
+
+            return d.map(ap)"""
+
+        deterministic = self.deterministic and shuffle > 0
+        flat_fn = self._split_image_fn(block_strides=block_strides, max_chunks=max_chunks_per_image)
+        encode = self._encode_fn()
+        ds = dataset
+        # ds = dat_dbg(ds, lambda x: tf.print("PRED", x['shape'], self.chunks_of(x['shape'], [s*8 for s in (block_strides if block_strides is not None else self.block_tile_size)])))
+        ds = ds.map(lambda x: x['path'], num_parallel_calls=self.parallel, deterministic=deterministic)
+        ds = ds.map(self._load_data_tf, num_parallel_calls=self.parallel, deterministic=deterministic)
+        ds = ds.flat_map(flat_fn)
+        if encode is not None:
+            ds = ds.map(encode, num_parallel_calls=self.parallel, deterministic=deterministic)
         if shuffle > 0:
             ds = ds.shuffle(shuffle, seed=self.seed, reshuffle_each_iteration=True)
         if max_size is not None:
@@ -94,35 +106,69 @@ class DsSplit:
             raise ValueError("Not split yet")
         return self._min_chunks
 
-    def get_chunks(self, max_chunks):
-        max_chunks = None if max_chunks is None else int(max_chunks)
-        getter = (lambda x: x) if max_chunks is None else (lambda x: x[:max_chunks])
+    def _load_data(self, path):
+        data_path = "%s.data.npz" % path.decode("utf-8")
+        data = np.load(data_path)
+        return data['dct'], data['noiseprint']
 
-        def process_entry(path, block_strides):
-            if isinstance(path, np.ndarray):
-                path = path[()]
-            path = path.decode("utf-8")
-            data_path = "%s.%s.npz" % (path, stride_to_str(block_strides))
-            data = np.load(data_path)
-            dct_patches = data['dct']
-            noiseprint_patches = data['noiseprint']
-            assert len(dct_patches) == len(noiseprint_patches)
-            # print(path, len(dct_patches), max_chunks)
-            return getter(dct_patches), getter(noiseprint_patches)
+    def _load_data_tf(self, path):
+        dct, noiseprint = tf.numpy_function(self._load_data, (path,), (tf.float16, tf.float16), name='load_data_tf')
+        dct.set_shape((None, None, 64))
+        noiseprint.set_shape((None, None))
+        return dct, noiseprint
 
-        def apply(x):
-            dct, noise = tf.numpy_function(process_entry, (x['path'], x['strides']), (tf.float16, tf.float16))
-            # tf.print(tf.shape(dct), max_chunks)
-            dct.set_shape((None, *self.block_tile_size, 64))
-            noise.set_shape((None, *self.tile_size))
-            dss = []
-            if self.dct_encoding is not None:
-                dss.append(Dataset.from_tensor_slices(dct))
-            if self.noiseprint:
-                dss.append(Dataset.from_tensor_slices(noise))
-            return dss[0] if len(dss) < 2 else Dataset.zip(tuple(dss))
+    def _split_image_fn(self, block_strides=None, max_chunks=None):
+        if block_strides is None:
+            block_strides = self.block_tile_size
+        strides = [8 * s for s in block_strides]
+        split_dct = split_image_fn(self.block_tile_size, block_strides)
+        split_noiseprint = split_image_fn(self.tile_size, strides)
+        apply = None
 
+        if max_chunks is None:
+            ret = lambda x: x
+        else:
+            ret = lambda x: x.shuffle(1000, seed=self.seed).take(max_chunks)
+
+        if self.noiseprint and self.dct_encoding is not None:
+            def apply(dct, noiseprint):
+                dct_chunks = split_dct(dct[tf.newaxis, ...])
+                noiseprint_chunks = split_noiseprint(noiseprint[tf.newaxis, ..., tf.newaxis])
+                # tf.print("ACT", tf.shape(noiseprint), tf.shape(dct_chunks)[0])
+                return ret(Dataset.zip(
+                    (Dataset.from_tensor_slices(dct_chunks), Dataset.from_tensor_slices(noiseprint_chunks))))
+        elif self.noiseprint:
+            def apply(dct, noiseprint):
+                return ret(Dataset.from_tensor_slices(split_noiseprint(noiseprint[tf.newaxis, ..., tf.newaxis])))
+        elif self.dct_encoding:
+            def apply(dct, noiseprint):
+                return ret(Dataset.from_tensor_slices(split_dct(dct[tf.newaxis, ...])))
+        assert apply is not None
         return apply
+
+    def _encode_fn(self):
+        if self.dct_encoding is not None:
+            reshape = reshape_block_dct(self.considered_coefficients)
+            encode = self.dct_encoding(self.considered_coefficients)
+            tf_encode_dct = tf.function(lambda x: encode(reshape(x)),
+                                        input_signature=(tf.TensorSpec((*self.block_tile_size, 64), dtype=tf.float16),))
+            if self.noiseprint:
+                return lambda d, n: (tf_encode_dct(d), n)
+            else:
+                return tf_encode_dct
+        else:
+            assert self.noiseprint
+            return None
+
+    def augemntation_strides(self, train_chunks):
+        max_chunks = max(train_chunks.values())
+        max_data_augmentation = {k: max_chunks / v for k, v in train_chunks.items()}
+        aug_strides = {}
+        for label, aug in max_data_augmentation.items():
+            axis_aug = math.sqrt(aug)
+            strides = [max(1, math.ceil(s / axis_aug)) for s in self.block_tile_size]
+            aug_strides[label] = strides
+        return aug_strides
 
     def split_datasets(self, ds_builder: SocialImages):
         datasets = ds_builder.as_dataset()
@@ -135,23 +181,24 @@ class DsSplit:
 
         self.labels_map = labels_map
 
-
         chunks_length = {k: self.count_chunks(ds) for k, ds in datasets.items()}
-        min_chunks = min(chunks_length.values())
+
         min_images = min([len(ds) for ds in datasets.values()])
         validation_size = min_images // 10
         test_size = min_images // 10
 
-        self._min_chunks = round((min_chunks * 0.8) * len(chunks_length))
         print({'test_images': test_size, 'val_images': validation_size,
                'train_images': (min_images - test_size - validation_size)})
+        print('Chunks:', chunks_length)
         # shuffle
         shuffled = {k: ds.shuffle(len(ds), seed=self.seed, reshuffle_each_iteration=False).cache() for k, ds in
                     datasets.items()}
         # cache the shuffled paths
         paths = [list(ds) for ds in shuffled.values()]
 
-        def take_images(ds_set, image_size, same_chunks=True):
+        def take_images(ds_set, image_size, same_chunks=True, strides=None):
+            if strides is None:
+                strides = self.tile_size
             ds = {k: ds.take(image_size).cache() for k, ds in ds_set.items()}
             chunks_limit = min([self.count_chunks(d) for d in ds.values()]) if same_chunks else None
             remain = {k: ds.skip(image_size) for k, ds in ds_set.items()}
@@ -159,29 +206,28 @@ class DsSplit:
             mappings = {}
             for label, dataset in ds.items():
                 max_chunks = None
+                ch_ds = [(x['path'], self.chunks_of(x['shape'], strides)) for x in dataset.as_numpy_iterator()]
                 if chunks_limit is not None:
-                    sorted_chunks = sorted(dataset.map(lambda x: x['chunks']).as_numpy_iterator())
+                    sorted_chunks = sorted(map(lambda x: x[1], ch_ds))
                     remaining_images = image_size
                     total = chunks_limit
                     max_chunks = None
                     for num_chunks in sorted_chunks:
-                        if total <= num_chunks * remaining_images:
+                        if total < num_chunks * remaining_images:
                             max_chunks = np.ceil(total / remaining_images)
                             break
                         total -= num_chunks
                         remaining_images -= 1
 
                     max_chunks_per_image[label] = max_chunks
-                if max_chunks is None:
-                    it = dataset.map(lambda x: (x['path'], x['chunks'])).as_numpy_iterator()
-                else:
-                    it = dataset.map(lambda x: (x['path'], tf.minimum(x['chunks'], max_chunks))).as_numpy_iterator()
+                if max_chunks is not None:
+                    ch_ds = map(lambda x: (x[0], min(x[1], max_chunks)), ch_ds)
                 if chunks_limit is None:
-                    res = list(it)
+                    res = list(ch_ds)
                 else:
                     res = []
                     total = chunks_limit
-                    for entry in it:
+                    for entry in ch_ds:
                         chunks = entry[1]
                         if total < chunks:
                             res.append((entry[0], total))
@@ -195,6 +241,20 @@ class DsSplit:
 
         val_ds, val_map, shuffled, max_chunks_val, val_chunks_limit = take_images(shuffled, validation_size)
         tst_ds, tst_map, shuffled, max_chunks_tst, tst_chunks_limit = take_images(shuffled, test_size, False)
+        val_chunks = {k: self.count_chunks(ds) for k, ds in val_ds.items()}
+        tst_chunks = {k: self.count_chunks(ds) for k, ds in val_ds.items()}
+        print("Val chunks", val_chunks)
+        print("Tst chunks", tst_chunks)
+        print("Max chunks per image val", max_chunks_val, val_chunks_limit)
+        print("Max chunks per image tst", max_chunks_tst, tst_chunks_limit)
+        train_chunks = {k: self.count_chunks(ds) for k, ds in shuffled.items()}
+        print("Train chunks", train_chunks)
+        augmentation_strides = self.augemntation_strides(train_chunks)
+        print("Aug strides", augmentation_strides)
+        after_aug_train = {k: self.count_chunks(ds, [8 * s for s in augmentation_strides[k]]) for k, ds in
+                           shuffled.items()}
+        self._min_chunks = min(after_aug_train.values()) * len(after_aug_train)
+        print("After aug", after_aug_train)
         self.val_ds = val_ds
         self.tst_ds = tst_ds
         self.mappings = (None, val_map, tst_map)
@@ -215,7 +275,8 @@ class DsSplit:
         test_ds = [self.to_final_dataset(k, ds, 0, tst_chunks_limit, max_chunks_tst[k]) for k, ds in tst_ds.items()]
         test_ds = datasets_concatenate(test_ds).prefetch(self.parallel)
 
-        train_ds = [self.to_final_dataset(k, ds, self.shuffle_train) for k, ds in train_ds.items()]
+        train_ds = [self.to_final_dataset(k, ds, self.shuffle_train, block_strides=augmentation_strides[k]) for k, ds in
+                    train_ds.items()]
         train_ds = [ds.repeat() for ds in train_ds]
         train_ds = datasets_interleave(train_ds).prefetch(self.parallel)
 
