@@ -30,7 +30,7 @@ class Metrics(Callback):
         self.cls = [val_generator.filter(filter_fn(i, n)).batch(128).cache() for i in range(n)]
 
     def on_epoch_end(self, epoch, logs=None):
-        if epoch % 4 != 0:
+        if epoch % 10 != 0:
             return
         self.model: Model
         # print("L3", len(self.cls3))

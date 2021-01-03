@@ -3,6 +3,7 @@ from time import time
 
 from PIL import Image
 from tensorflow.python.keras.metrics import Recall
+from tensorflow.python.keras.optimizer_v2.adam import Adam
 from tensorflow.python.keras.optimizer_v2.nadam import Nadam
 
 from socialdetector.dataset.social_images.social_images import SocialImages
@@ -21,7 +22,7 @@ def require_not_none(obj, msg):
 class Experiment:
     loss_function = 'categorical_crossentropy'
     metric_functions = [Recall(), 'accuracy']
-    optimizer = Nadam(lr=0.0001)
+    optimizer = Adam(lr=0.001)
     steps_per_epoch = None
 
     repeat_train = True
@@ -33,7 +34,7 @@ class Experiment:
     noiseprint = False
     dct_encoding = None
     default_steps = 1000
-    shuffle = 5000
+    shuffle = 500000
     seed = 12321
 
     def __repr__(self):

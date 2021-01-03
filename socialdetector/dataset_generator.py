@@ -6,7 +6,7 @@ from socialdetector.dct_utils import coefficient_order
 
 
 def reshape_block_dct(considered_coefficients=10):
-    considered_coefficients = coefficient_order[:considered_coefficients]
+    considered_coefficients = coefficient_order[1:1 + considered_coefficients]
 
     def apply(x):
         if len(x.shape) > 3:
@@ -26,7 +26,7 @@ def encode_coefficients_paper(considered_coefficients=10):
         size = x.shape[-1]
         x = tf.map_fn(lambda a: tf.histogram_fixed_width(a, (-50.5, 50.5), nbins=101, dtype=tf.int32), x,
                       fn_output_signature=tf.int32)
-        x = tf.reshape(x, (-1,)) / size
+        x = tf.reshape(x, (-1,))
 
         return x[..., tf.newaxis]
 
@@ -47,6 +47,6 @@ def encode_coefficients_my(considered_coefficients=10):
         x = tf.convert_to_tensor(results)
         x = tf.einsum("ij...->ji...", x)
 
-        return x / size
+        return x
 
     return apply

@@ -8,32 +8,32 @@ from socialdetector.train_utils import EvaluateCallback
 
 
 def test_noiseprintonly():
-    path = "./history/noiseprint_only/ucid_public/1609511639.9576898_std/e199-l0.2542-v0.4447.h5"
+    path = r".\history\ucid_public\noiseprint_only_12321\1609707570.874374_std\e07-l0.3366-v0.5750.h5"
 
     experiment = ExpNoiseprint()
     experiment.dataset_builder = UcidPublic()
-    experiment.load_from(path).evaluate()
+    experiment.load_from(path).evaluate(True)
 
 
 def test_myjpeg():
-    path = "./history/my_jpeg/ucid_public/1609359679.82444_long/e220-l0.2023-v0.3521.ckpt"
+    path = r".\history\ucid_public\jpeg_paper_12321\1609704892.370081_std\e20-l0.2306-v0.4067.h5"
     experiment = ExpMyJpeg()
     experiment.dataset_builder = UcidPublic()
-    experiment.load_from(path).evaluate()
+    experiment.load_from(path).evaluate(True)
 
 
 def test_paperjpeg():
     path = "./history/jpeg_paper/1608074487/e39-l0.1786-v0.1852.h5"
-    path = "./history/jpeg_paper/1608074487/e35-l0.1290-v0.2095.h5"
+    path = r".\history\ucid_public\jpeg_paper_12321\1609704892.370081_std\e20-l0.2306-v0.4067.h5"
     experiment = ExpPaperJpeg()
-    experiment.dataset_builder = UcidSocial()
-    experiment.load_from(path).evaluate()
+    experiment.dataset_builder = UcidPublic()
+    experiment.load_from(path).evaluate(True)
 
 
 def test_twostream():
     path = "./history/two_streams/ucid_public/1609540064.0625489_std/e230-l0.0450-v0.3101.h5"
     #path = ".\\history\\two_streams\\ucid_social\\1609585022.0416644_std\\e51-l0.0184-v0.0287.h5"
-    path = r".\history\ucid_public\two_streams_999999\1609679999.9570293_std\e29-l0.2712-v0.3808.h5"
+    path = r".\history\ucid_public\two_streams_12321\1609709473.1455812_std\e23-l0.1074-v0.4027.h5"
     experiment = ExpTwoStreams()
     experiment.dataset_builder = UcidPublic()
     experiment.load_from(path)

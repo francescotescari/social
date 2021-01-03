@@ -1,3 +1,4 @@
+from tensorflow.python.keras.optimizer_v2.adam import Adam
 from tensorflow.python.keras.optimizer_v2.nadam import Nadam
 
 from experiments import *
@@ -13,12 +14,12 @@ dataset.download_and_prepare()
 # IpLabThree().download_and_prepare()
 
 
-experiment = ExpMyJpeg()
+experiment = ExpTwoStreams()
 # name
 experiment.extra = "std"
 experiment.batch_size = 256
 experiment.dataset_builder = dataset
-experiment.optimizer = Nadam(0.0001)
+experiment.optimizer = Adam(lr=0.0002)
 # experiment.steps_per_epoch = 100
 
 
