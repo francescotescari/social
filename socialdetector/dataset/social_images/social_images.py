@@ -58,6 +58,25 @@ def stride_to_str(strides):
     return "strides_%d_%d" % (strides[0], strides[1])
 
 
+def open_image_quality(path):
+    image = Image.open(path)
+    quality = jpeg_quality_of(image)
+    image = np.asarray(image.convert('YCbCr'))[..., 0]
+    return image, quality
+
+
+def compute_block_dct(image):
+    block_dct = blockwise_dct_matrix(image.astype(np.int16) - 128, add_padding=False)
+    return block_dct.reshape((*block_dct.shape[:-2], 64))
+
+
+def compute_noiseprint(image, quality, engine=None):
+    if engine is None:
+        engine = NoiseprintEngineV2()
+    engine.load_session(quality)
+    return normalize_noiseprint(engine.predict(image.astype(np.float32) / 256.0))
+
+
 class SocialImages(tfds.core.GeneratorBasedBuilder, ABC):
     """DatasetBuilder for social_images dataset."""
 
@@ -81,6 +100,7 @@ class SocialImages(tfds.core.GeneratorBasedBuilder, ABC):
         return {
             'path': tfds.features.Text(),
             'chunks': tfds.features.Tensor(shape=(), dtype=tf.int32),
+            #'shape': tfds.features.Tensor(shape=(2,), dtype=tf.int32),
             'strides': tfds.features.Tensor(shape=(2,), dtype=tf.int8)
         }
 
@@ -155,9 +175,7 @@ class SocialImages(tfds.core.GeneratorBasedBuilder, ABC):
             return self._process_image(path, image, quality, engine, strides, block_strides)
 
         for path in dataset:
-            image = Image.open(path)
-            quality = jpeg_quality_of(image)
-            image = np.asarray(image.convert('YCbCr'))[..., 0]
+            image, quality = open_image_quality(path)
 
             quality_request = cached_requests[quality]
             quality_request.append((path, image))
@@ -175,30 +193,15 @@ class SocialImages(tfds.core.GeneratorBasedBuilder, ABC):
 
     def _process_image(self, path: str, image: np.ndarray, quality: int, engine: NoiseprintEngineV2, strides,
                        block_strides):
-        data_path = "%s.%s.npz" % (path, stride_to_str(block_strides))
-        dct_patches = None
-        if os.path.exists(data_path):
-            width, height = imagesize.get(path)
-            dct_patches = np.load(data_path)['dct']
-            on_x = (width - self.tile_size[0]) // strides[0] + 1
-            on_y = (height - self.tile_size[1]) // strides[1] + 1
-            if len(dct_patches) != on_x * on_y:
-                # number of patches is not congruent with strides and tile size, recompute
-                dct_patches = None
-
-        if dct_patches is None:
-            block_dct = blockwise_dct_matrix(image.astype(np.int16) - 128, add_padding=False)
-            block_dct = block_dct.reshape((*block_dct.shape[:-2], 64)).astype(np.float16)
-            engine.load_session(quality)
-            noiseprint = normalize_noiseprint(engine.predict(image.astype(np.float32) / 256.0)).astype(np.float16)
-            dct_patches = extract_patches(block_dct, self.block_tile_size, block_strides)
-            noiseprint_patches = extract_patches(noiseprint, self.tile_size, strides)
-            assert len(dct_patches) == len(noiseprint_patches)
-            np.savez(data_path, dct=dct_patches, noiseprint=noiseprint_patches)
+        data_path = "%s.data.npz" % path
+        if not os.path.exists(data_path):
+            block_dct = compute_block_dct(image).astype(np.float16)
+            noiseprint = compute_noiseprint(image, quality, engine).astype(np.float16)
+            np.savez(data_path, dct=block_dct, noiseprint=noiseprint)
 
         return path, {
             'path': path,
-            'chunks': len(dct_patches),
+            'shape': image.shape[:2],
             'strides': block_strides
         }
 

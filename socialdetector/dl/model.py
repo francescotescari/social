@@ -9,6 +9,7 @@ from tensorflow.python.client.session import InteractiveSession
 from tensorflow.python.keras import Input, Model
 from tensorflow.python.keras.callbacks import TensorBoard, ModelCheckpoint, Callback
 from tensorflow.python.keras.layers import Concatenate
+from tensorflow.python.keras.metrics import Recall
 from tensorflow.python.keras.models import load_model
 from tensorflow.python.keras.optimizer_v2.adam import Adam
 
@@ -49,7 +50,7 @@ class GenericModel:
         self.model = Model(img_input, last_layer)
         self.model.summary()
 
-    def compile(self, loss_function, metric_functions=None, optimizer=Adam(1e-3, epsilon=1e-6)):
+    def compile(self, loss_function, metric_functions=(Recall(), 'accuracy'), optimizer=Adam(1e-3, epsilon=1e-6)):
         self.require_model_loaded()
         return self.model.compile(loss=loss_function, optimizer=optimizer, metrics=metric_functions)
 
@@ -75,7 +76,7 @@ class GenericModel:
             store_path = os.path.join(checkpoint_path, folder_id)
             if not os.path.exists(store_path):
                 os.makedirs(store_path)
-            store_path = os.path.join(store_path, 'e{epoch:02d}-l{loss:.4f}-v{val_loss:.4f}.ckpt')
+            store_path = os.path.join(store_path, 'e{epoch:02d}-l{loss:.4f}-v{val_loss:.4f}.h5')
             print("Storing to %s" % store_path)
             self.registered_callbacks.append(
                 ModelCheckpoint(store_path, monitor='val_loss', verbose=1, period=1, save_best_only=False, mode='min'))

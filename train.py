@@ -13,9 +13,9 @@ dataset.download_and_prepare()
 # IpLabThree().download_and_prepare()
 
 
-experiment = ExpMyJpeg()
+experiment = ExpTwoStreams()
 # name
-experiment.extra = "long"
+experiment.extra = "std"
 experiment.batch_size = 256
 experiment.dataset_builder = dataset
 experiment.optimizer = Nadam(0.0001)

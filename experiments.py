@@ -30,8 +30,8 @@ class StdLocalExperiment(LocalExperiment):
 
     def __init__(self, noiseprint=False, dct_encoding=None):
         super().__init__()
-        self.ds_constructor.dct_encoding = dct_encoding
-        self.ds_constructor.noiseprint = noiseprint
+        self.noiseprint = noiseprint
+        self.dct_encoding = dct_encoding
 
 
 class ExpNoiseprint(StdLocalExperiment):

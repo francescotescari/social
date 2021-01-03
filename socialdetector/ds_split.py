@@ -9,6 +9,7 @@ from socialdetector.dataset_utils import datasets_concatenate, datasets_interlea
 
 
 class DsSplit:
+    tile_size = (64, 64)
 
     @staticmethod
     def count_chunks(ds):
@@ -43,20 +44,27 @@ class DsSplit:
         self._min_chunks = None
         self.mappings = None
         self.labels_map = None
-
-        def not_yet(*args, **kwargs):
-            raise NotImplementedError("Not yet calculated")
-
-        self.flat_fn = not_yet
-        self.encode_fn = not_yet
+        self.block_tile_size = [s // 8 for s in self.tile_size]
         self.val_ds = None
         self.tst_ds = None
 
+        self.encode_fn = None
+        if self.dct_encoding is not None:
+            reshape = reshape_block_dct(self.considered_coefficients)
+            encode = self.dct_encoding(self.considered_coefficients)
+            re = tf.function(lambda x: encode(reshape(x)),
+                             input_signature=(tf.TensorSpec((*self.block_tile_size, 64), dtype=tf.float16),))
+            if self.noiseprint:
+                self.encode_fn = lambda d, n: (re(d), n)
+            else:
+                self.encode_fn = re
+
     def to_final_dataset(self, label, dataset: Dataset, shuffle: int, max_size=None, max_chunks_per_image=None):
-        flat_fn = self.flat_fn(max_chunks_per_image)
+        flat_fn = self.get_chunks(max_chunks_per_image)
         ds = dataset.flat_map(flat_fn)
         if self.encode_fn is not None:
-            ds = ds.map(self.encode_fn, num_parallel_calls=self.parallel, deterministic=self.deterministic)
+            ds = ds.map(self.encode_fn, num_parallel_calls=self.parallel,
+                        deterministic=(self.deterministic and shuffle > 0))
         if shuffle > 0:
             ds = ds.shuffle(shuffle, seed=self.seed, reshuffle_each_iteration=True)
         if max_size is not None:
@@ -69,44 +77,52 @@ class DsSplit:
         return Dataset.zip((v, lb_ds))
 
     @property
+    def labels(self):
+        im = {tuple(v): k for k, v in self.labels_map.items()}
+        n = len(im)
+
+        def label_of(i, n):
+            zeros = [0] * n
+            zeros[i] = 1
+            return zeros
+
+        return [im[tuple(label_of(i, n))] for i in range(n)]
+
+    @property
     def min_chunks(self):
         if self._min_chunks is None:
             raise ValueError("Not split yet")
         return self._min_chunks
 
-    def get_chunks(self, tile_size, block_tile_size):
+    def get_chunks(self, max_chunks):
+        max_chunks = None if max_chunks is None else int(max_chunks)
+        getter = (lambda x: x) if max_chunks is None else (lambda x: x[:max_chunks])
 
-        def get_fn(max_chunks):
-            max_chunks = None if max_chunks is None else int(max_chunks)
-            getter = (lambda x: x) if max_chunks is None else (lambda x: x[:max_chunks])
+        def process_entry(path, block_strides):
+            if isinstance(path, np.ndarray):
+                path = path[()]
+            path = path.decode("utf-8")
+            data_path = "%s.%s.npz" % (path, stride_to_str(block_strides))
+            data = np.load(data_path)
+            dct_patches = data['dct']
+            noiseprint_patches = data['noiseprint']
+            assert len(dct_patches) == len(noiseprint_patches)
+            # print(path, len(dct_patches), max_chunks)
+            return getter(dct_patches), getter(noiseprint_patches)
 
-            def process_entry(path, block_strides):
-                if isinstance(path, np.ndarray):
-                    path = path[()]
-                path = path.decode("utf-8")
-                data_path = "%s.%s.npz" % (path, stride_to_str(block_strides))
-                data = np.load(data_path)
-                dct_patches = data['dct']
-                noiseprint_patches = data['noiseprint']
-                assert len(dct_patches) == len(noiseprint_patches)
-                #print(path, len(dct_patches), max_chunks)
-                return getter(dct_patches), getter(noiseprint_patches)
+        def apply(x):
+            dct, noise = tf.numpy_function(process_entry, (x['path'], x['strides']), (tf.float16, tf.float16))
+            # tf.print(tf.shape(dct), max_chunks)
+            dct.set_shape((None, *self.block_tile_size, 64))
+            noise.set_shape((None, *self.tile_size))
+            dss = []
+            if self.dct_encoding is not None:
+                dss.append(Dataset.from_tensor_slices(dct))
+            if self.noiseprint:
+                dss.append(Dataset.from_tensor_slices(noise))
+            return dss[0] if len(dss) < 2 else Dataset.zip(tuple(dss))
 
-            def apply(x):
-                dct, noise = tf.numpy_function(process_entry, (x['path'], x['strides']), (tf.float16, tf.float16))
-                #tf.print(tf.shape(dct), max_chunks)
-                dct.set_shape((None, *block_tile_size, 64))
-                noise.set_shape((None, *tile_size))
-                dss = []
-                if self.dct_encoding is not None:
-                    dss.append(Dataset.from_tensor_slices(dct))
-                if self.noiseprint:
-                    dss.append(Dataset.from_tensor_slices(noise))
-                return dss[0] if len(dss) < 2 else Dataset.zip(tuple(dss))
-
-            return apply
-
-        return get_fn
+        return apply
 
     def split_datasets(self, ds_builder: SocialImages):
         datasets = ds_builder.as_dataset()
@@ -118,17 +134,7 @@ class DsSplit:
             labels_map[labels[i]] = zeros
 
         self.labels_map = labels_map
-        self.flat_fn = self.get_chunks(ds_builder.tile_size, ds_builder.block_tile_size)
-        self.encode_fn = None
-        if self.dct_encoding is not None:
-            reshape = reshape_block_dct(self.considered_coefficients)
-            encode = self.dct_encoding(self.considered_coefficients)
-            re = tf.function(lambda x: encode(reshape(x)),
-                             input_signature=(tf.TensorSpec((*ds_builder.block_tile_size, 64), dtype=tf.float16),))
-            if self.noiseprint:
-                self.encode_fn = lambda d, n: (re(d), n)
-            else:
-                self.encode_fn = re
+
 
         chunks_length = {k: self.count_chunks(ds) for k, ds in datasets.items()}
         min_chunks = min(chunks_length.values())
@@ -136,7 +142,7 @@ class DsSplit:
         validation_size = min_images // 10
         test_size = min_images // 10
 
-        self._min_chunks = (min_chunks * 0.8) * len(chunks_length)
+        self._min_chunks = round((min_chunks * 0.8) * len(chunks_length))
         print({'test_images': test_size, 'val_images': validation_size,
                'train_images': (min_images - test_size - validation_size)})
         # shuffle
@@ -145,45 +151,50 @@ class DsSplit:
         # cache the shuffled paths
         paths = [list(ds) for ds in shuffled.values()]
 
-        def take_images(ds_set, image_size):
+        def take_images(ds_set, image_size, same_chunks=True):
             ds = {k: ds.take(image_size).cache() for k, ds in ds_set.items()}
-            chunks_limit = min([self.count_chunks(d) for d in ds.values()])
+            chunks_limit = min([self.count_chunks(d) for d in ds.values()]) if same_chunks else None
             remain = {k: ds.skip(image_size) for k, ds in ds_set.items()}
-            max_chunks_per_image = {}
+            max_chunks_per_image = {k: None for k in ds}
             mappings = {}
             for label, dataset in ds.items():
-                sorted_chunks = sorted(dataset.map(lambda x: x['chunks']).as_numpy_iterator())
-                remaining_images = image_size
-                total = chunks_limit
                 max_chunks = None
-                for num_chunks in sorted_chunks:
-                    if total <= num_chunks * remaining_images:
-                        max_chunks = np.ceil(total / remaining_images)
-                        break
-                    total -= num_chunks
-                    remaining_images -= 1
+                if chunks_limit is not None:
+                    sorted_chunks = sorted(dataset.map(lambda x: x['chunks']).as_numpy_iterator())
+                    remaining_images = image_size
+                    total = chunks_limit
+                    max_chunks = None
+                    for num_chunks in sorted_chunks:
+                        if total <= num_chunks * remaining_images:
+                            max_chunks = np.ceil(total / remaining_images)
+                            break
+                        total -= num_chunks
+                        remaining_images -= 1
 
-                max_chunks_per_image[label] = max_chunks
+                    max_chunks_per_image[label] = max_chunks
                 if max_chunks is None:
                     it = dataset.map(lambda x: (x['path'], x['chunks'])).as_numpy_iterator()
                 else:
                     it = dataset.map(lambda x: (x['path'], tf.minimum(x['chunks'], max_chunks))).as_numpy_iterator()
-                res = []
-                total = chunks_limit
-                for entry in it:
-                    chunks = entry[1]
-                    if total < chunks:
-                        res.append((entry[0], total))
-                        break
+                if chunks_limit is None:
+                    res = list(it)
+                else:
+                    res = []
+                    total = chunks_limit
+                    for entry in it:
+                        chunks = entry[1]
+                        if total < chunks:
+                            res.append((entry[0], total))
+                            break
 
-                    res.append(entry)
-                    total -= chunks
+                        res.append(entry)
+                        total -= chunks
                 mappings[label] = res
 
             return ds, mappings, remain, max_chunks_per_image, chunks_limit
 
         val_ds, val_map, shuffled, max_chunks_val, val_chunks_limit = take_images(shuffled, validation_size)
-        tst_ds, tst_map, shuffled, max_chunks_tst, tst_chunks_limit = take_images(shuffled, test_size)
+        tst_ds, tst_map, shuffled, max_chunks_tst, tst_chunks_limit = take_images(shuffled, test_size, False)
         self.val_ds = val_ds
         self.tst_ds = tst_ds
         self.mappings = (None, val_map, tst_map)
