@@ -82,12 +82,14 @@ class GenericModel:
                 ModelCheckpoint(store_path, monitor='val_loss', verbose=1, period=1, save_best_only=False, mode='min'))
 
     def train_with_generator(self, training_data_generator, epochs,
-                             steps_per_epoch, validation_data=None):
+                             steps_per_epoch, validation_data=None, **kwargs):
+        if len(kwargs) > 0:
+            print("Additional train options", kwargs)
         self.model.fit(training_data_generator,
                        use_multiprocessing=True, workers=4, steps_per_epoch=steps_per_epoch,
                        callbacks=self.registered_callbacks, epochs=epochs, verbose=1,
-                       # class_weight={0: 3, 1: 1, 2: 1.3},
-                       **({} if validation_data is None else {"validation_data": validation_data}))
+                       validation_data=validation_data, **kwargs
+                       )
 
     def require_model_loaded(self):
         if self.model is None:

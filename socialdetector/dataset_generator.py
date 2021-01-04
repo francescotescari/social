@@ -33,6 +33,31 @@ def encode_coefficients_paper(considered_coefficients=10):
     return apply
 
 
+@tf.function
+def normalize_max_min(t, axis=None):
+    t = tf.cast(t, tf.float32)
+    t_max = tf.reduce_max(t, axis=axis)
+    t_min = tf.reduce_min(t, axis=axis)
+    if axis is not None:
+        t_max = tf.expand_dims(t_max, axis=axis)
+        t_min = tf.expand_dims(t_min, axis=axis)
+    #tf.print("A", t_min, "B", t_max, "\n")
+    diff = (t_max - t_min)
+    diff += tf.where(diff == 0,1.0, 0.0)
+    return 2*((t - t_min) / diff)-1
+
+@tf.function
+def normalize(t, axis=None):
+    t = tf.cast(t, tf.float32)
+    m = tf.reduce_mean(t, axis=axis)
+    s = tf.math.reduce_std(t, axis=axis)
+    if axis is not None:
+        t_max = tf.expand_dims(m, axis=axis)
+        t_min = tf.expand_dims(s, axis=axis)
+    #tf.print("A", t_min, "B", t_max, "\n")
+    s += tf.where(s == 0, 1.0, 0.0)
+    return (t-m)/s
+
 def encode_coefficients_my(considered_coefficients=10):
     def apply(x):
         x = tf.reshape(x, (-1, considered_coefficients))
@@ -46,7 +71,7 @@ def encode_coefficients_my(considered_coefficients=10):
 
         x = tf.convert_to_tensor(results)
         x = tf.einsum("ij...->ji...", x)
-
-        return x
+        #return x
+        return normalize(x)
 
     return apply

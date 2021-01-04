@@ -1,4 +1,6 @@
-from tensorflow.python.keras.layers import Conv2D, BatchNormalization, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.python.keras.layers import Conv2D, BatchNormalization, MaxPooling2D, Flatten, Dense, Dropout, \
+    GaussianDropout, GaussianNoise
+from tensorflow.python.keras.regularizers import l2
 
 from socialdetector.dl.jpeg_cnn import MyCNNJpeg
 from socialdetector.dl.model import GenericModel, MultiModel, CombineModel, StreamModel
@@ -9,6 +11,8 @@ class NoiseprintModel(StreamModel):
 
     def get_stream_model(self, input_img):
         layer = input_img
+        layer = GaussianNoise(0.1)(layer)
+        layer = GaussianDropout(0.1)(layer)
         layer = Conv2D(64, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
         layer = MaxPooling2D((2, 2))(layer)
         layer = BatchNormalization()(layer)
@@ -49,9 +53,11 @@ class FullModel(CombineModel):
     def get_output_model(self, layer):
         # layer = Dropout(0.2)(layer)
         layer = Dense(256, activation=self.activation)(layer)
-        layer = Dropout(0.5)(layer)
-        layer = Dense(256, activation=self.activation)(layer)
-        layer = Dropout(0.5)(layer)
+        layer = Dropout(0.3)(layer)
+        layer = Dense(512, activation=self.activation)(layer)
+        layer = Dropout(0.3)(layer)
+        layer = Dense(512, activation=self.activation)(layer)
+        layer = Dropout(0.3)(layer)
         layer = Dense(256, activation=self.activation)(layer)
         layer = Dense(self.classes, activation='softmax')(layer)
         return layer

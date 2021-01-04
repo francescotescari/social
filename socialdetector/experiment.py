@@ -30,12 +30,12 @@ class Experiment:
     model_type = None
     dataset_builder: SocialImages = None
     extra = None
-    batch_size = 512
+    batch_size = 256
     noiseprint = False
     dct_encoding = None
     default_steps = 1000
-    shuffle = 500000
-    seed = 12321
+    shuffle = 200000
+    seed = 1302
 
     def __repr__(self):
         raise NotImplementedError
@@ -57,7 +57,8 @@ class Experiment:
             'optimizer': self.optimizer
         })
         self.train_config.update({
-            'steps_per_epoch': self.steps_per_epoch
+            'steps_per_epoch': self.steps_per_epoch,
+            'class_weight': None if self.splitter is None else self.splitter.class_weights
         })
 
     @property
@@ -135,6 +136,7 @@ class Experiment:
         self.default_steps = self.splitter.min_chunks // self.batch_size // 4
         if self.batch_size > 0:
             res[0] = res[0].batch(self.batch_size)
+        res[0] = res[0].shuffle(500, reshuffle_each_iteration=True)
 
         self.split_ds = res
         # print("MAP", self.img_mappings)

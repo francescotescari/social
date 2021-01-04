@@ -14,12 +14,13 @@ dataset.download_and_prepare()
 # IpLabThree().download_and_prepare()
 
 
-experiment = ExpTwoStreams()
+experiment = ExpMyJpeg()
 # name
 experiment.extra = "std"
 experiment.batch_size = 256
 experiment.dataset_builder = dataset
-experiment.optimizer = Adam(lr=0.0002)
+experiment.shuffle = 15000
+experiment.optimizer = Nadam(lr=0.0001)
 # experiment.steps_per_epoch = 100
 
 

@@ -33,9 +33,9 @@ def test_paperjpeg():
 def test_twostream():
     path = "./history/two_streams/ucid_public/1609540064.0625489_std/e230-l0.0450-v0.3101.h5"
     #path = ".\\history\\two_streams\\ucid_social\\1609585022.0416644_std\\e51-l0.0184-v0.0287.h5"
-    path = r".\history\ucid_public\two_streams_12321\1609709473.1455812_std\e23-l0.1074-v0.4027.h5"
+    path = r".\history\ip_lab_three\two_streams_12321\1609757430.632222_std\e51-l0.0202-v0.0985.h5"
     experiment = ExpTwoStreams()
-    experiment.dataset_builder = UcidPublic()
+    experiment.dataset_builder = IpLabThree()
     experiment.load_from(path)
 
     experiment.evaluate(True)

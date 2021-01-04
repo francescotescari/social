@@ -55,6 +55,7 @@ class DsSplit:
         self.block_tile_size = [s // 8 for s in self.tile_size]
         self.val_ds = None
         self.tst_ds = None
+        self.class_weights = None
 
     def to_final_dataset(self, label, dataset: Dataset, shuffle: int, max_size=None, max_chunks_per_image=None,
                          block_strides=None):
@@ -67,7 +68,7 @@ class DsSplit:
 
             return d.map(ap)"""
 
-        deterministic = self.deterministic and shuffle > 0
+        deterministic = self.deterministic and shuffle != 0
         flat_fn = self._split_image_fn(block_strides=block_strides, max_chunks=max_chunks_per_image)
         encode = self._encode_fn()
         ds = dataset
@@ -251,6 +252,7 @@ class DsSplit:
         print("Max chunks per image tst", max_chunks_tst, tst_chunks_limit)
         train_chunks = {k: self.count_chunks(ds) for k, ds in shuffled.items()}
         print("Train chunks", train_chunks)
+
         # augmentation_strides = {k: self.block_tile_size for k in shuffled}
         augmentation_strides = self.augemntation_strides(train_chunks)
         print("Aug strides", augmentation_strides)
@@ -258,6 +260,16 @@ class DsSplit:
                            shuffled.items()}
         self._min_chunks = sum(after_aug_train.values())
         print("After aug", after_aug_train)
+
+        max_chunks = max(after_aug_train.values())
+        class_weights = {k: max_chunks / v for k, v in after_aug_train.items()}
+        print("Class weights", class_weights)
+        self.class_weights = {i: class_weights[self.labels[i]] for i in range(len(class_weights))}
+        # self.class_weights = None
+        128 / len(class_weights)
+        inter_block = {k: round(128 / len(class_weights) / class_weights[k]) for k in class_weights}
+        print("Inter block", inter_block)
+
         self.val_ds = val_ds
         self.tst_ds = tst_ds
         self.mappings = (None, val_map, tst_map)
@@ -278,9 +290,20 @@ class DsSplit:
         test_ds = [self.to_final_dataset(k, ds, 0, tst_chunks_limit, max_chunks_tst[k]) for k, ds in tst_ds.items()]
         test_ds = datasets_concatenate(test_ds).prefetch(self.parallel)
 
-        train_ds = [self.to_final_dataset(k, ds, self.shuffle_train, block_strides=augmentation_strides[k]) for k, ds in
-                    train_ds.items()]
-        train_ds = [ds.repeat() for ds in train_ds]
-        train_ds = datasets_interleave(train_ds).prefetch(self.shuffle_train)
+        interleave_before = False
+
+        train_ds = [self.to_final_dataset(k, ds, -1 if interleave_before else self.shuffle_train // len(self.labels),
+                                          block_strides=augmentation_strides[k]) for k, ds in train_ds.items()]
+
+        if interleave_before:
+            block_len = tuple(inter_block.values())
+            train_ds = datasets_interleave(train_ds, block_length=block_len).repeat()
+            train_ds = train_ds.shuffle(self.shuffle_train, reshuffle_each_iteration=True, seed=self.seed)
+        else:
+            train_ds = [t.repeat() for t in train_ds]
+            train_ds = datasets_interleave(train_ds)
+            self.class_weights = None
+
+        train_ds = train_ds.prefetch(self.shuffle_train)
 
         return train_ds, validation_ds, test_ds
