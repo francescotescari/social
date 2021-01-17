@@ -16,15 +16,15 @@ def test_noiseprintonly():
 
 
 def test_myjpeg():
-    path = r".\history\ucid_public\jpeg_paper_12321\1609704892.370081_std\e20-l0.2306-v0.4067.h5"
+    path = r".\history\ucid_public\my_jpeg_1302\1610898653.529077_std\e12-l0.2424-v0.2652.h5"
     experiment = ExpMyJpeg()
     experiment.dataset_builder = UcidPublic()
     experiment.load_from(path).evaluate(True)
 
 
 def test_paperjpeg():
-    path = "./history/jpeg_paper/1608074487/e39-l0.1786-v0.1852.h5"
-    path = r".\history\ucid_public\jpeg_paper_12321\1609704892.370081_std\e20-l0.2306-v0.4067.h5"
+    path = r"./history\ucid_public\my_jpeg_1302\1610897119.8677504_std\e20-l0.1980-v0.4742.h5"
+    path = r".\history\ucid_public\jpeg_paper_1302\1610900684.9518209_std\e20-l0.2514-v0.2835.h5"
     experiment = ExpPaperJpeg()
     experiment.dataset_builder = UcidPublic()
     experiment.load_from(path).evaluate(True)
@@ -41,4 +41,4 @@ def test_twostream():
     experiment.evaluate(True)
 
 
-test_twostream()
+test_paperjpeg()

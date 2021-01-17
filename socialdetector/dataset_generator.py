@@ -70,8 +70,8 @@ def encode_coefficients_my(considered_coefficients=10):
             results.append([tf.histogram_fixed_width(diff[j], (-0.5, 0.5), 11) for j in range(considered_coefficients)])
 
         x = tf.convert_to_tensor(results)
-        x = tf.einsum("ij...->ji...", x)
+        x = tf.einsum("abc->acb", x)
         #return x
-        return normalize(x)
+        return x / size
 
     return apply

@@ -88,7 +88,7 @@ class Experiment:
             train = train.repeat()
         val = dss[1].cache()
         tst = dss[2].cache()
-        self.model.registered_callbacks.append(Metrics(val))
+        self.model.registered_callbacks.append(Metrics(val, 2))
         self.model.train_with_generator(train, epochs=20000, validation_data=val.batch(256), **self.train_config)
 
     def evaluate(self, full_evaluation=False):

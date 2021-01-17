@@ -16,7 +16,7 @@ from socialdetector.ds_split import DsSplit
 
 class Metrics(Callback):
 
-    def __init__(self, val_generator: Dataset):
+    def __init__(self, val_generator: Dataset, freq=10):
         super().__init__()
 
         def filter_fn(i, n):
@@ -27,19 +27,29 @@ class Metrics(Callback):
         label_shape = val_generator.output_shapes[1]
         n = label_shape[0]
 
+        self.freq = freq
+        self.max_met = 0
+
         self.cls = [val_generator.filter(filter_fn(i, n)).batch(128).cache() for i in range(n)]
 
     def on_epoch_end(self, epoch, logs=None):
-        if epoch % 10 != 0:
+        if epoch % self.freq != 1:
             return
         self.model: Model
         # print("L3", len(self.cls3))
         hand = getattr(self.model, "_eval_data_handler", None)
         self.model._eval_data_handler = None
+        mets = []
         for i in range(len(self.cls)):
             print("Class %d:" % i)
-            self.model.evaluate(self.cls[i])
+            mets.append(self.model.evaluate(self.cls[i]))
         self.model._eval_data_handler = hand
+        mets = np.mean(np.array(mets), axis=0)
+        print("\n\nMetrics: ", mets)
+        val = mets[1]
+        if val > self.max_met:
+            self.max_met = val
+            print("NEW_MAX", val)
 
 
 def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
