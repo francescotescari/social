@@ -59,8 +59,6 @@ class DsSplit:
         self.class_weights = None
         self.debug = debug
 
-
-
     def labelize(self, k, v: Dataset, x=0, sw=None):
         def mk_getter(n):
             if callable(n):
@@ -80,7 +78,6 @@ class DsSplit:
             mfn = lambda *args: (x(args), lb, sw(args))
         else:
             mfn = lambda *args: (x(args), lb)
-
 
         return v.map(mfn, num_parallel_calls=self.parallel, deterministic=self.deterministic)
         """lb_ds = Dataset.from_tensors().repeat()
@@ -182,7 +179,7 @@ class DsSplit:
             aug_strides[label] = strides
         return aug_strides
 
-    def take_images(self, ds_set, image_size, same_chunks=True, strides=None):
+    def take_images(self, ds_set, image_size, same_chunks=False, strides=None):
         if strides is None:
             strides = self.tile_size
         ds = {k: ds.take(image_size).cache() for k, ds in ds_set.items()}
@@ -239,12 +236,12 @@ class DsSplit:
         chunks_length = {k: self.count_chunks(ds) for k, ds in datasets.items()}
 
         images = {k: len(ds) for k, ds in datasets.items()}
-        avg_chunks = {k: chunks_length[k]/images[k] for k in chunks_length}
+        avg_chunks = {k: chunks_length[k] / images[k] for k in chunks_length}
 
-        min_images = min([len(ds) for ds in datasets.values()])
+        min_images = min(images.values())
         validation_size = min_images // 10
         test_size = min_images // 10
-        train_images = {k: n-validation_size-test_size for k, n in images.items()}
+        train_images = {k: n - validation_size - test_size for k, n in images.items()}
 
         print({'test_images': test_size, 'val_images': validation_size,
                'train_images': (min_images - test_size - validation_size)})
@@ -255,8 +252,8 @@ class DsSplit:
         # cache the shuffled paths
         paths = [list(ds) for ds in shuffled.values()]
 
-        val_ds, val_map, shuffled, max_chunks_val, val_chunks_limit = self.take_images(shuffled, validation_size, False)
-        tst_ds, tst_map, shuffled, max_chunks_tst, tst_chunks_limit = self.take_images(shuffled, test_size, False)
+        val_ds, val_map, shuffled, max_chunks_val, val_chunks_limit = self.take_images(shuffled, validation_size)
+        tst_ds, tst_map, shuffled, max_chunks_tst, tst_chunks_limit = self.take_images(shuffled, test_size)
         val_chunks = {k: self.count_chunks(ds) for k, ds in val_ds.items()}
         tst_chunks = {k: self.count_chunks(ds) for k, ds in val_ds.items()}
         print("Val chunks", val_chunks)
@@ -296,25 +293,27 @@ class DsSplit:
         train_ds = {k: ds.cache().shuffle(len(ds), seed=self.seed, reshuffle_each_iteration=True) for k, ds in
                     shuffled.items()}
 
-        validation_ds = [self.to_final_dataset(k, ds, 0, val_chunks_limit, max_chunks_val[k], sample_weight=None) for k, ds in
+        validation_ds = [self.to_final_dataset(k, ds, 0, val_chunks_limit, max_chunks_val[k], sample_weight=None) for
+                         k, ds in
                          val_ds.items()]
         validation_ds = datasets_concatenate(validation_ds).prefetch(self.parallel)
 
         test_ds = [self.to_final_dataset(k, ds, 0, tst_chunks_limit, max_chunks_tst[k]) for k, ds in tst_ds.items()]
         test_ds = datasets_concatenate(test_ds).prefetch(self.parallel)
 
-        interleave_before = False
-
         sample_weight = 'default'
         sample_weight = None
-        sample_weight = {k: lambda x, n=after_aug_train[k]/train_images[k]: n/x[1][0] for k in after_aug_train}
+        # sample_weight = {k: lambda x, n=after_aug_train[k]/train_images[k]: n/x[1][0] for k in after_aug_train}
         if self.debug:
             sample_weight = lambda x: x[1]
-        print("sample_weight", self.debug)
+        print("sample_weight", sample_weight, self.debug)
 
+        interleave_before = False
 
+        if not isinstance(sample_weight, dict):
+            sample_weight = {k: sample_weight for k in train_ds}
         train_ds = [self.to_final_dataset(k, ds, -1 if interleave_before else self.shuffle_train // len(self.labels),
-                                          block_strides=augmentation_strides[k], repeat=(not interleave_before),
+                                          block_strides=augmentation_strides[k],
                                           sample_weight=sample_weight[k]) for k, ds in train_ds.items()]
 
         if interleave_before:
@@ -324,6 +323,7 @@ class DsSplit:
             train_ds = train_ds.shuffle(self.shuffle_train, reshuffle_each_iteration=True, seed=self.seed)
             self.class_weights = None
         else:
+            train_ds = [ds.repeat() for ds in train_ds]
             train_ds = datasets_interleave(train_ds)
             self.class_weights = None
 

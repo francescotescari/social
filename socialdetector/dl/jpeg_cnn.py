@@ -13,10 +13,10 @@ class PaperCNNModel(GenericModel):
     def model_structure(self, input_img):
         layer = input_img
         layer = Conv1D(100, 3, activation=self.conv_activation)(layer)
-       # layer = BatchNormalization()(layer)
+        # layer = BatchNormalization()(layer)
         layer = MaxPooling1D()(layer)
         layer = Conv1D(100, 3, activation=self.conv_activation)(layer)
-        #layer = BatchNormalization()(layer)
+        # layer = BatchNormalization()(layer)
         layer = MaxPooling1D()(layer)
         # layer = Conv1D(4, 3, activation=self.conv_activation)(layer)
         # layer = BatchNormalization()(layer)
@@ -40,33 +40,24 @@ class MyCNNJpeg(StreamModel):
 
     def get_stream_model(self, input_img):
         layer = input_img
-        layer = Conv2D(128, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        layer = Conv2D(64, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
         layer = BatchNormalization()(layer)
-        layer = Conv2D(128, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
-        # layer = Sine()(layer)
-        #layer = Dropout(0.2)(layer)
+        layer = Conv2D(64, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        layer = BatchNormalization()(layer)
         layer = MaxPooling2D((2, 2))(layer)
-        layer = BatchNormalization()(layer)
-        layer = Conv2D(256, (3, 3), activation=self.conv_activation, padding='valid')(layer)
-        layer = BatchNormalization()(layer)
-        #layer = Dropout(0.2)(layer)
-        """layer = BatchNormalization()(layer)
-        layer = Conv2D(1024, (3, 3), activation=self.conv_activation, padding='valid',
-                       data_format='channels_first')(layer)"""
-        # layer = MaxPooling2D((2, 1), data_format='channels_first')(layer)
-        # layer = Conv2D(256, (3, 3), activation='sigmoid', padding='valid',data_format='channels_first')(layer)
-        # layer = Dense(32, activation=self.activation)(layer)
+        layer = Conv2D(128, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+
         layer = Flatten(name='flat_dct')(layer)
         return layer
 
     def get_output_model(self, input_img):
         layer = input_img
         # layer = Dropout(0.5)(layer)
-        layer = Dense(256, activation=self.activation)(layer)
+        layer = Dense(128, activation=self.activation)(layer)
         layer = Dropout(0.5)(layer)
-        layer = Dense(256, activation=self.activation)(layer)
+        layer = Dense(128, activation=self.activation)(layer)
         layer = Dropout(0.5)(layer)
-        layer = Dense(256, activation=self.activation)(layer)
+        layer = Dense(128, activation=self.activation)(layer)
         layer = Dense(self.classes, activation='softmax')(layer)
         return layer
 

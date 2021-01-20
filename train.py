@@ -19,7 +19,7 @@ experiment = ExpMyJpeg()
 experiment.extra = "std"
 experiment.batch_size = 256
 experiment.dataset_builder = dataset
-experiment.shuffle = 120000
+experiment.shuffle = 15000
 experiment.optimizer = Nadam(lr=0.0001)
 # experiment.steps_per_epoch = 100
 
