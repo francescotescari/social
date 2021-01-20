@@ -76,7 +76,7 @@ class GenericModel:
             store_path = os.path.join(checkpoint_path, folder_id)
             if not os.path.exists(store_path):
                 os.makedirs(store_path)
-            store_path = os.path.join(store_path, 'e{epoch:02d}-l{loss:.4f}-v{val_loss:.4f}.h5')
+            store_path = os.path.join(store_path, 'e{epoch:02d}-l{loss:.4f}.h5')
             print("Storing to %s" % store_path)
             self.registered_callbacks.append(
                 ModelCheckpoint(store_path, monitor='val_loss', verbose=1, period=1, save_best_only=False, mode='min'))

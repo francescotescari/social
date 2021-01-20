@@ -7,6 +7,7 @@ import numpy as np
 from socialdetector.dataset.social_images.social_images import SocialImages, stride_to_str
 from socialdetector.dataset_generator import reshape_block_dct
 from socialdetector.dataset_utils import datasets_concatenate, datasets_interleave, split_image_fn
+from socialdetector.utility import is_listing
 
 
 class DsSplit:
@@ -58,29 +59,32 @@ class DsSplit:
         self.class_weights = None
         self.debug = debug
 
-    def to_final_dataset(self, label, dataset: Dataset, shuffle: int, max_size=None, max_chunks_per_image=None,
-                         block_strides=None, sample_weight=None):
 
-        deterministic = self.deterministic and shuffle != 0
-        flat_fn = self._split_image_fn(block_strides=block_strides, max_chunks=max_chunks_per_image)
-        encode = self._encode_fn()
-        ds = dataset
-        # ds = dat_dbg(ds, lambda x: tf.print("PRED", x['shape'], self.chunks_of(x['shape'], [s*8 for s in (block_strides if block_strides is not None else self.block_tile_size)])))
-        ds = ds.map(lambda x: x['path'], num_parallel_calls=self.parallel, deterministic=deterministic)
-        ds = ds.map(lambda x: (*self._load_data_tf(x), x), num_parallel_calls=self.parallel, deterministic=deterministic)
-        ds = ds.flat_map(flat_fn)
-        if encode is not None:
-            ds = ds.map(encode, num_parallel_calls=self.parallel, deterministic=deterministic)
-        if shuffle > 0:
-            ds = ds.shuffle(shuffle, seed=self.seed, reshuffle_each_iteration=True)
-        if max_size is not None:
-            ds = ds.take(max_size)
-        ds = self.labelize(label, ds, sample_weight)
-        return ds
 
-    def labelize(self, k, v, sw=None):
-        lb_ds = Dataset.from_tensors(self.labels_map[k]).repeat()
-        return Dataset.zip((v, lb_ds, Dataset.from_tensors(sw).repeat()) if sw is not None else (v, lb_ds))
+    def labelize(self, k, v: Dataset, x=0, sw=None):
+        def mk_getter(n):
+            if callable(n):
+                return n
+            if is_listing(n):
+                return lambda args: tuple(args[i] for i in n)
+            else:
+                if n is not None:
+                    return lambda args: args[n]
+                else:
+                    return lambda args: tuple()
+
+        x = mk_getter(x)
+        lb = self.labels_map[k]
+        if sw is not None:
+            sw = mk_getter(sw)
+            mfn = lambda *args: (x(args), lb, sw(args))
+        else:
+            mfn = lambda *args: (x(args), lb)
+
+
+        return v.map(mfn, num_parallel_calls=self.parallel, deterministic=self.deterministic)
+        """lb_ds = Dataset.from_tensors().repeat()
+        return Dataset.zip((v, lb_ds, Dataset.from_tensors(sw).repeat()) if sw is not None else (v, lb_ds))"""
 
     @property
     def labels(self):
@@ -122,7 +126,7 @@ class DsSplit:
         if max_chunks is None:
             taker = lambda x: x
         else:
-            taker = lambda x: x.shuffle(1000, seed=self.seed).take(max_chunks)
+            taker = lambda x: x.shuffle(len(x), seed=self.seed).take(max_chunks)
 
         def ret(ds, *args):
 
@@ -136,19 +140,21 @@ class DsSplit:
                 noiseprint_chunks = split_noiseprint(noiseprint[tf.newaxis, ..., tf.newaxis])
                 # tf.print("ACT", tf.shape(noiseprint), tf.shape(dct_chunks)[0])
                 return ret(Dataset.zip(
-                    (Dataset.from_tensor_slices(dct_chunks), Dataset.from_tensor_slices(noiseprint_chunks))), *args)
+                    (Dataset.from_tensor_slices(dct_chunks), Dataset.from_tensor_slices(noiseprint_chunks))),
+                    tf.shape(noiseprint)[0], *args)
         elif self.noiseprint:
             def apply(dct, noiseprint, *args):
-                return ret(Dataset.from_tensor_slices(split_noiseprint(noiseprint[tf.newaxis, ..., tf.newaxis])), *args)
+                return ret(Dataset.from_tensor_slices(split_noiseprint(noiseprint[tf.newaxis, ..., tf.newaxis])),
+                           tf.shape(noiseprint)[0], *args)
         elif self.dct_encoding:
             def apply(dct, noiseprint, *args):
-                return ret(Dataset.from_tensor_slices(split_dct(dct[tf.newaxis, ...])), *args)
+                return ret(Dataset.from_tensor_slices(split_dct(dct[tf.newaxis, ...])), tf.shape(noiseprint)[0], *args)
         assert apply is not None
         return apply
 
-    def _encode_fn(self):
+    def _encode_fn(self, more_data):
         def wrap(fn):
-            if self.debug:
+            if more_data:
                 return lambda dn, db: (fn(dn), db)
             else:
                 return lambda dn, db: fn(dn)
@@ -159,7 +165,7 @@ class DsSplit:
             tf_encode_dct = tf.function(lambda x: encode(reshape(x)),
                                         input_signature=(tf.TensorSpec((*self.block_tile_size, 64), dtype=tf.float16),))
             if self.noiseprint:
-                return wrap(lambda d, n: (tf_encode_dct(d), n))
+                return wrap(lambda dn: (tf_encode_dct(dn[0]), dn[1]))
             else:
                 return wrap(tf_encode_dct)
         else:
@@ -232,9 +238,13 @@ class DsSplit:
 
         chunks_length = {k: self.count_chunks(ds) for k, ds in datasets.items()}
 
+        images = {k: len(ds) for k, ds in datasets.items()}
+        avg_chunks = {k: chunks_length[k]/images[k] for k in chunks_length}
+
         min_images = min([len(ds) for ds in datasets.values()])
         validation_size = min_images // 10
         test_size = min_images // 10
+        train_images = {k: n-validation_size-test_size for k, n in images.items()}
 
         print({'test_images': test_size, 'val_images': validation_size,
                'train_images': (min_images - test_size - validation_size)})
@@ -286,7 +296,7 @@ class DsSplit:
         train_ds = {k: ds.cache().shuffle(len(ds), seed=self.seed, reshuffle_each_iteration=True) for k, ds in
                     shuffled.items()}
 
-        validation_ds = [self.to_final_dataset(k, ds, 0, val_chunks_limit, max_chunks_val[k]) for k, ds in
+        validation_ds = [self.to_final_dataset(k, ds, 0, val_chunks_limit, max_chunks_val[k], sample_weight=None) for k, ds in
                          val_ds.items()]
         validation_ds = datasets_concatenate(validation_ds).prefetch(self.parallel)
 
@@ -295,18 +305,56 @@ class DsSplit:
 
         interleave_before = False
 
+        sample_weight = 'default'
+        sample_weight = None
+        sample_weight = {k: lambda x, n=after_aug_train[k]/train_images[k]: n/x[1][0] for k in after_aug_train}
+        if self.debug:
+            sample_weight = lambda x: x[1]
+        print("sample_weight", self.debug)
+
+
         train_ds = [self.to_final_dataset(k, ds, -1 if interleave_before else self.shuffle_train // len(self.labels),
-                                          block_strides=augmentation_strides[k]) for k, ds in train_ds.items()]
+                                          block_strides=augmentation_strides[k], repeat=(not interleave_before),
+                                          sample_weight=sample_weight[k]) for k, ds in train_ds.items()]
 
         if interleave_before:
             block_len = tuple(inter_block.values())
+            block_len = None
             train_ds = datasets_interleave(train_ds, block_length=block_len).repeat()
             train_ds = train_ds.shuffle(self.shuffle_train, reshuffle_each_iteration=True, seed=self.seed)
+            self.class_weights = None
         else:
-            train_ds = [t.repeat() for t in train_ds]
             train_ds = datasets_interleave(train_ds)
             self.class_weights = None
 
         train_ds = train_ds.prefetch(self.shuffle_train)
 
         return train_ds, validation_ds, test_ds
+
+    def to_final_dataset(self, label, dataset: Dataset, shuffle: int, max_size=None, max_chunks_per_image=None,
+                         block_strides=None, sample_weight='default', repeat=False):
+        if sample_weight == 'default':
+            if max_chunks_per_image is None:
+                sample_weight = lambda x: 1000 / x[1][0]
+            else:
+                sample_weight = lambda x: max_chunks_per_image / tf.reduce_min([x[1][0], max_chunks_per_image])
+
+        deterministic = self.deterministic and shuffle != 0
+        flat_fn = self._split_image_fn(block_strides=block_strides, max_chunks=max_chunks_per_image)
+        encode = self._encode_fn(sample_weight is not None or self.debug)
+        ds = dataset
+        # ds = dat_dbg(ds, lambda x: tf.print("PRED", x['shape'], self.chunks_of(x['shape'], [s*8 for s in (block_strides if block_strides is not None else self.block_tile_size)])))
+        ds = ds.map(lambda x: x['path'], num_parallel_calls=self.parallel, deterministic=deterministic)
+        ds = ds.map(lambda x: (*self._load_data_tf(x), x), num_parallel_calls=self.parallel,
+                    deterministic=deterministic)
+        ds = ds.flat_map(flat_fn)
+        if encode is not None:
+            ds = ds.map(encode, num_parallel_calls=self.parallel, deterministic=deterministic)
+        if repeat:
+            ds = ds.repeat()
+        if shuffle > 0:
+            ds = ds.shuffle(shuffle, seed=self.seed, reshuffle_each_iteration=True)
+        if max_size is not None:
+            ds = ds.take(max_size)
+        ds = self.labelize(label, ds, sw=sample_weight)
+        return ds

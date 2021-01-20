@@ -22,7 +22,7 @@ class Metrics(Callback):
         def filter_fn(i, n):
             zeros = [0] * n
             zeros[i] = 1
-            return lambda x, y: tf.reduce_all(y == zeros)
+            return lambda *args: tf.reduce_all(args[1] == zeros)
 
         label_shape = val_generator.output_shapes[1]
         n = label_shape[0]
@@ -52,6 +52,49 @@ class Metrics(Callback):
             print("NEW_MAX", val)
 
 
+class MyValidation(Callback):
+
+    def __init__(self, ds, batch_size=128, name='Validation'):
+
+        super().__init__()
+
+        def filter_fn(i, n):
+            zeros = [0] * n
+            zeros[i] = 1
+            return lambda *args: tf.reduce_all(args[1] == zeros)
+
+        label_shape = tf.compat.v1.data.get_output_shapes(ds)[1]
+        n = label_shape[0]
+
+        self.max_met = 0
+        self.name = name
+        self.cls = [ds.filter(filter_fn(i, n)).batch(batch_size).cache() for i in range(n)]
+        self.fp = open('log_%s.txt' % name, 'w')
+
+    def on_epoch_end(self, epoch, logs=None):
+        if logs is None:
+            logs = {}
+
+        hand = getattr(self.model, "_eval_data_handler", None)
+        self.model._eval_data_handler = None
+        mets = []
+        print('\n')
+        for i in range(len(self.cls)):
+            print("%s %d:" % (self.name, i))
+            mets.append(self.model.evaluate(self.cls[i]))
+        self.model._eval_data_handler = hand
+        mets = np.mean(np.array(mets), axis=0)
+        self.model: Model
+        assert len(self.model.metrics) == (len(mets))
+        for m, val in zip(self.model.metrics, mets):
+            m: Metric
+            logs['val_' + m.name] = val
+        print(logs)
+        self.fp.write('%d: %r\n' % (epoch, logs))
+        self.fp.flush()
+        return logs
+
+
 def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
     def take(ds, n):
         pred, true = [], []
@@ -62,7 +105,9 @@ def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
         return pred, true
 
     def map_pred(ds):
-        for x, y_true in ds:
+        for sample in ds:
+            x = sample[0]
+            y_true = sample[1]
             y_pred = model.predict(x)
             for e in zip(y_pred, y_true):
                 yield e
@@ -70,11 +115,12 @@ def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
     def form(arr):
         return list(map('{:.2f}'.format, arr))
 
-    n_lab = ds.output_shapes[1][1]
+    n_lab = tf.compat.v1.data.get_output_shapes(ds)[1][1]
     ds = map_pred(ds)
     cce = CategoricalCrossentropy()
 
     total = 0
+    avgs = []
     for entry in mapping:
         name, chunks = entry
         name = os.path.basename(name.decode("utf-8"))
@@ -94,6 +140,8 @@ def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
         zeros[y_pred] = 1
         y_pred = zeros
         y_true = y_true[0]
+        print(counts[tf.argmax(y_true)], '/', sum(counts))
+        avgs.append([n/sum(counts) for n in counts])
         if tf.argmax(y_true) != tf.argmax(y_pred):
             print("WRONG: %s" % name, form(y_pred2), " | ", counts, " -> ", form(y_true))
         # print(form(y_pred), form(y_true.numpy()))
@@ -101,6 +149,7 @@ def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
             metric.update_state(y_true, y_pred)
 
     more = 0
+    print("AVGSS", np.mean(np.array(avgs), axis=0))
     try:
         while True:
             next(ds)
@@ -139,9 +188,9 @@ class EvaluateCallback(Callback):
 
         def filter_fn(i, n):
             lb = label_of(i, n)
-            return lambda x, y: tf.reduce_all(y == lb)
+            return lambda *args: tf.reduce_all(args[1] == lb)
 
-        label_shape = val_generator.output_shapes[1]
+        label_shape = tf.compat.v1.data.get_output_shapes(val_generator)[1]
         n = label_shape[0]
 
         self.cls = [val_generator.filter(filter_fn(i, n)).batch(128).cache() for i in range(n)]

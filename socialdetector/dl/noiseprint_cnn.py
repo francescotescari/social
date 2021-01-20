@@ -9,12 +9,18 @@ class NoiseprintModel(StreamModel):
 
     def get_stream_model(self, input_img):
         layer = input_img
-        layer = Conv2D(256, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        layer = Conv2D(32, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        #layer = Dropout(0.2)(layer)
         layer = MaxPooling2D((2, 2))(layer)
         layer = BatchNormalization()(layer)
-        layer = Conv2D(256, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        layer = Conv2D(64, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        #layer = Dropout(0.2)(layer)
         layer = MaxPooling2D((2, 2))(layer)
-        layer = Dense(128, activation=self.activation)(layer)
+        layer = BatchNormalization()(layer)
+        #layer = Conv2D(128, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        #layer = Dropout(0.2)(layer)
+        #layer = MaxPooling2D((2, 2))(layer)
+        #layer = Dense(128, activation=self.activation)(layer)
         #layer = BatchNormalization()(layer)
         """layer = Conv2D(64, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
         layer = MaxPooling2D((2, 2))(layer)"""
@@ -50,9 +56,9 @@ class FullModel(CombineModel):
     def get_output_model(self, layer):
         # layer = Dropout(0.2)(layer)
         layer = Dense(256, activation=self.activation)(layer)
-        layer = Dropout(0.3)(layer)
+        layer = Dropout(0.5)(layer)
         layer = Dense(256, activation=self.activation)(layer)
-        layer = Dropout(0.3)(layer)
+        layer = Dropout(0.5)(layer)
         layer = Dense(256, activation=self.activation)(layer)
         layer = Dense(self.classes, activation='softmax')(layer)
         return layer
