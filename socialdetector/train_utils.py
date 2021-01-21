@@ -124,7 +124,7 @@ def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
     avgs = []
     for entry in mapping:
         name, chunks = entry
-        name = os.path.basename(name.decode("utf-8"))
+        name = name.decode("utf-8")
         y_pred, y_true = take(ds, chunks)
         total += len(y_pred)
         # print(name, chunks, "LOSS", cce(y_true, y_pred).numpy())

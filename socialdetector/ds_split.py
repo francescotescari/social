@@ -292,6 +292,7 @@ class DsSplit:
         avg_val_chunks = np.mean(list(val_chunks.values()))
         print('Avg chunk in val', avg_val_chunks)
         val_sw = lambda x: avg_val_chunks / validation_size / x[0]
+        # val_sw = None
         validation_ds = [self.to_final_dataset(k, ds, 0, val_chunks_limit, max_chunks_val[k], sample_weight=val_sw) for
                          k, ds in
                          val_ds.items()]
@@ -302,8 +303,9 @@ class DsSplit:
 
         avg_tst_chunks = np.mean(list(after_aug_train.values()))
         sample_weight = 'default'
-        sample_weight = {k: lambda x, n=(after_aug_train[k] / train_images[k]): (n / x[0]) for k in after_aug_train}
-        # sample_weight = lambda *args: 1
+        sample_weight = {k: lambda x, n=(after_aug_train[k] / train_images[k]): tf.math.sqrt(n / x[0]) for k in after_aug_train}
+        # sample_weight = {k: lambda x, n=(after_aug_train[k]**2 / train_images[k]**2): (n / x[0]**2) for k in after_aug_train}
+        sample_weight = (lambda *args: 1) if val_sw is not None else None
 
         if self.debug:
             sample_weight = lambda x: x
@@ -316,10 +318,11 @@ class DsSplit:
         train_ds = [self.to_final_dataset(k, ds, -1 if interleave_before else self.shuffle_train // len(self.labels),
                                           block_strides=augmentation_strides[k],
                                           sample_weight=sample_weight[k]) for k, ds in train_ds.items()]
-
+        print('OSS', [tf.compat.v1.data.get_output_shapes(t) for t in train_ds])
         if interleave_before:
             block_len = tuple(inter_block.values())
             block_len = None
+
             train_ds = datasets_interleave(train_ds, block_length=block_len).repeat()
             train_ds = train_ds.shuffle(self.shuffle_train, reshuffle_each_iteration=True, seed=self.seed)
             self.class_weights = None

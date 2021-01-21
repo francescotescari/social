@@ -35,7 +35,7 @@ class Experiment:
     dct_encoding = None
     default_steps = 1000
     shuffle = 200000
-    seed = 1302
+    seed = 12321
 
     def __repr__(self):
         raise NotImplementedError
@@ -136,7 +136,7 @@ class Experiment:
                                 shuffle_train=self.shuffle)
 
         res = list(self.splitter.split_datasets(self.dataset_builder))
-        self.default_steps = self.splitter.min_chunks // self.batch_size // 4
+        self.default_steps = self.splitter.min_chunks // self.batch_size // 2
         if self.batch_size > 0:
             res[0] = res[0].batch(self.batch_size)
 

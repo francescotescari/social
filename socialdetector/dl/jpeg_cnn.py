@@ -40,12 +40,14 @@ class MyCNNJpeg(StreamModel):
 
     def get_stream_model(self, input_img):
         layer = input_img
-        layer = Conv2D(64, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        layer = Conv2D(32, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
         layer = BatchNormalization()(layer)
-        layer = Conv2D(64, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        layer = Conv2D(32, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
         layer = BatchNormalization()(layer)
         layer = MaxPooling2D((2, 2))(layer)
-        layer = Conv2D(128, (3, 3), activation=self.conv_activation, padding=self.padding)(layer)
+        layer = Conv2D(64, (3, 3), activation=self.conv_activation, padding='valid')(layer)
+        layer = BatchNormalization()(layer)
+        layer = Conv2D(64, (3, 3), activation=self.conv_activation, padding='valid')(layer)
 
         layer = Flatten(name='flat_dct')(layer)
         return layer

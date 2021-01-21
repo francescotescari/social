@@ -20,7 +20,7 @@ experiment.extra = "std"
 experiment.batch_size = 256
 experiment.dataset_builder = dataset
 experiment.shuffle = 150000
-experiment.optimizer = Nadam(lr=0.0001)
+experiment.optimizer = Nadam(lr=0.0005)
 # experiment.steps_per_epoch = 100
 
 
