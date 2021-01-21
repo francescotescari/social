@@ -1,5 +1,6 @@
 import math
 import os
+from typing import Any
 
 from tensorflow.python.data import Dataset
 import tensorflow as tf
@@ -59,7 +60,7 @@ class DsSplit:
         self.class_weights = None
         self.debug = debug
 
-    def labelize(self, k, v: Dataset, x=0, sw=None):
+    def labelize(self, k, v: Dataset, deterministic, sw=None):
         def mk_getter(n):
             if callable(n):
                 return n
@@ -71,17 +72,15 @@ class DsSplit:
                 else:
                     return lambda args: tuple()
 
-        x = mk_getter(x)
         lb = self.labels_map[k]
         if sw is not None:
             sw = mk_getter(sw)
-            mfn = lambda *args: (x(args), lb, sw(args))
+            mfn = lambda *args: (args[0], lb, sw(args[1]))
         else:
-            mfn = lambda *args: (x(args), lb)
+            mfn = lambda *args: (args[0], lb)
 
-        return v.map(mfn, num_parallel_calls=self.parallel, deterministic=self.deterministic)
-        """lb_ds = Dataset.from_tensors().repeat()
-        return Dataset.zip((v, lb_ds, Dataset.from_tensors(sw).repeat()) if sw is not None else (v, lb_ds))"""
+        return v.map(mfn, num_parallel_calls=self.parallel, deterministic=deterministic)
+
 
     @property
     def labels(self):
@@ -126,7 +125,7 @@ class DsSplit:
             taker = lambda x: x.shuffle(len(x), seed=self.seed).take(max_chunks)
 
         def ret(ds, *args):
-
+            args = (len(ds), *args)
             args = Dataset.from_tensors(args).repeat()
             ds = taker(ds)
             return Dataset.zip((ds, args))
@@ -137,15 +136,13 @@ class DsSplit:
                 noiseprint_chunks = split_noiseprint(noiseprint[tf.newaxis, ..., tf.newaxis])
                 # tf.print("ACT", tf.shape(noiseprint), tf.shape(dct_chunks)[0])
                 return ret(Dataset.zip(
-                    (Dataset.from_tensor_slices(dct_chunks), Dataset.from_tensor_slices(noiseprint_chunks))),
-                    tf.shape(noiseprint)[0], *args)
+                    (Dataset.from_tensor_slices(dct_chunks), Dataset.from_tensor_slices(noiseprint_chunks))), *args)
         elif self.noiseprint:
             def apply(dct, noiseprint, *args):
-                return ret(Dataset.from_tensor_slices(split_noiseprint(noiseprint[tf.newaxis, ..., tf.newaxis])),
-                           tf.shape(noiseprint)[0], *args)
+                return ret(Dataset.from_tensor_slices(split_noiseprint(noiseprint[tf.newaxis, ..., tf.newaxis])), *args)
         elif self.dct_encoding:
             def apply(dct, noiseprint, *args):
-                return ret(Dataset.from_tensor_slices(split_dct(dct[tf.newaxis, ...])), tf.shape(noiseprint)[0], *args)
+                return ret(Dataset.from_tensor_slices(split_dct(dct[tf.newaxis, ...])), *args)
         assert apply is not None
         return apply
 
@@ -293,7 +290,10 @@ class DsSplit:
         train_ds = {k: ds.cache().shuffle(len(ds), seed=self.seed, reshuffle_each_iteration=True) for k, ds in
                     shuffled.items()}
 
-        validation_ds = [self.to_final_dataset(k, ds, 0, val_chunks_limit, max_chunks_val[k], sample_weight=None) for
+        avg_val_chunks = np.mean(list(val_chunks.values()))
+        print('Avg chunk in val', avg_val_chunks)
+        val_sw = lambda x: avg_val_chunks/validation_size/x[0]
+        validation_ds = [self.to_final_dataset(k, ds, 0, val_chunks_limit, max_chunks_val[k], sample_weight=val_sw) for
                          k, ds in
                          val_ds.items()]
         validation_ds = datasets_concatenate(validation_ds).prefetch(self.parallel)
@@ -301,11 +301,12 @@ class DsSplit:
         test_ds = [self.to_final_dataset(k, ds, 0, tst_chunks_limit, max_chunks_tst[k]) for k, ds in tst_ds.items()]
         test_ds = datasets_concatenate(test_ds).prefetch(self.parallel)
 
+
         sample_weight = 'default'
-        sample_weight = None
+        sample_weight = {k: lambda x, n=(after_aug_train[k]/train_images[k]): (n/x[0]) for k in after_aug_train }
         # sample_weight = {k: lambda x, n=after_aug_train[k]/train_images[k]: n/x[1][0] for k in after_aug_train}
         if self.debug:
-            sample_weight = lambda x: x[1]
+            sample_weight = lambda x: x
         print("sample_weight", sample_weight, self.debug)
 
         interleave_before = False
@@ -332,14 +333,14 @@ class DsSplit:
         return train_ds, validation_ds, test_ds
 
     def to_final_dataset(self, label, dataset: Dataset, shuffle: int, max_size=None, max_chunks_per_image=None,
-                         block_strides=None, sample_weight='default', repeat=False):
+                         block_strides=None, sample_weight: Any = 'default', repeat=False):
         if sample_weight == 'default':
             if max_chunks_per_image is None:
-                sample_weight = lambda x: 1000 / x[1][0]
+                sample_weight = lambda x: 1000 / x[0]
             else:
                 sample_weight = lambda x: max_chunks_per_image / tf.reduce_min([x[1][0], max_chunks_per_image])
 
-        deterministic = self.deterministic and shuffle != 0
+        deterministic = self.deterministic or shuffle == 0
         flat_fn = self._split_image_fn(block_strides=block_strides, max_chunks=max_chunks_per_image)
         encode = self._encode_fn(sample_weight is not None or self.debug)
         ds = dataset
@@ -356,5 +357,5 @@ class DsSplit:
             ds = ds.shuffle(shuffle, seed=self.seed, reshuffle_each_iteration=True)
         if max_size is not None:
             ds = ds.take(max_size)
-        ds = self.labelize(label, ds, sw=sample_weight)
+        ds = self.labelize(label, ds, sw=sample_weight, deterministic=deterministic)
         return ds

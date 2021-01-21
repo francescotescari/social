@@ -7,7 +7,7 @@ from tensorflow.python.keras.optimizer_v2.adam import Adam
 from tensorflow.python.keras.optimizer_v2.nadam import Nadam
 
 from socialdetector.dataset.social_images.social_images import SocialImages
-from socialdetector.train_utils import Metrics, ConfusionMatrix, EvaluateCallback, MyValidation
+from socialdetector.train_utils import Metrics, ConfusionMatrix, EvaluateCallback, MyValidation, balance_validation
 
 from socialdetector.dl.model import GenericModel
 from socialdetector.ds_split import DsSplit
@@ -89,9 +89,10 @@ class Experiment:
         val = dss[1].cache()
         tst = dss[2].cache()
         # self.model.registered_callbacks.append(Metrics(val, 2))
-        self.model.registered_callbacks.insert(0, MyValidation(val, 256, name='Validation'))
-        self.model.registered_callbacks.insert(1, MyValidation(tst, 256, name='Test'))
-        self.model.train_with_generator(train, epochs=20000, **self.train_config)
+        #self.model.registered_callbacks.insert(0, MyValidation(val, 256, name='Validation'))
+        #self.model.registered_callbacks.insert(1, MyValidation(tst, 256, name='Test'))
+        val = balance_validation(val).batch(self.batch_size).cache()
+        self.model.train_with_generator(train, epochs=20000, validation_data=val, **self.train_config)
 
     def evaluate(self, full_evaluation=False):
         self._assure_model_ready()

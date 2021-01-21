@@ -11,6 +11,7 @@ import numpy as np
 from texttable import Texttable
 
 from socialdetector.dataset.social_images.social_images import SocialImages
+from socialdetector.dataset_utils import datasets_concatenate
 from socialdetector.ds_split import DsSplit
 
 
@@ -141,7 +142,7 @@ def evaluate_ds(model, ds, mapping, img_metrics=(), chunk_metrics=()):
         y_pred = zeros
         y_true = y_true[0]
         print(counts[tf.argmax(y_true)], '/', sum(counts))
-        avgs.append([n/sum(counts) for n in counts])
+        avgs.append([n / sum(counts) for n in counts])
         if tf.argmax(y_true) != tf.argmax(y_pred):
             print("WRONG: %s" % name, form(y_pred2), " | ", counts, " -> ", form(y_true))
         # print(form(y_pred), form(y_true.numpy()))
@@ -277,3 +278,46 @@ class ConfusionMatrix(Metric):
             i += 1
 
         print(table.draw())
+
+def _all_equals(iterator):
+    first = True
+    last = None
+    for i in iterator:
+        if not first and i != last:
+            return False
+        first = False
+        last = i
+    return True
+
+def balance_validation(ds):
+    print('Balancing validation...')
+
+    def filter_fn(i, n):
+        zeros = [0] * n
+        zeros[i] = 1
+        return lambda *args: tf.reduce_all(args[1] == zeros)
+
+    oss = tf.compat.v1.data.get_output_shapes(ds)
+    label_shape = oss[1]
+    n = label_shape[0]
+
+    if len(oss) > 2:
+        gw = lambda *args: args[2]
+        st = lambda f: lambda x, y, w: (x, y, w*f)
+    else:
+        gw = lambda *args: 1
+        st = lambda f: lambda x, y: (x, y, f)
+
+    cls = [ds.filter(filter_fn(i, n)) for i in range(n)]
+    weights = [sum(cl.map(gw).as_numpy_iterator()) for cl in cls]
+    print('Before balancing', weights)
+    if _all_equals([round(w*100) for w in weights]):
+        return ds
+    dest_w = np.mean(weights)
+    fs = [dest_w/w for w in weights]
+    fns = [st(f) for f in fs]
+    cls = [cl.map(f) for cl, f in zip(cls, fns)]
+    weights = [sum(cl.map(lambda *args: args[2]).as_numpy_iterator()) for cl in cls]
+    print('After balancing', weights)
+    return datasets_concatenate(cls)
+
