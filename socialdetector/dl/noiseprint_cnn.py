@@ -43,16 +43,16 @@ class NoiseprintModel(StreamModel):
 
 class FullModel(CombineModel):
     classes = 3
-
+    dense_f = 256
     activation = "swish"
 
     def get_output_model(self, layer):
         # layer = Dropout(0.2)(layer)
-        layer = Dense(512, activation=self.activation)(layer)
-        layer = Dropout(0.5)(layer)
-        layer = Dense(512, activation=self.activation)(layer)
-        layer = Dropout(0.5)(layer)
-        layer = Dense(512, activation=self.activation)(layer)
+        layer = Dense(self.dense_f, activation=self.activation)(layer)
+        # layer = Dropout(0.5)(layer)
+        layer = Dense(self.dense_f, activation=self.activation)(layer)
+        # layer = Dropout(0.5)(layer)
+        layer = Dense(self.dense_f, activation=self.activation)(layer)
         layer = Dense(self.classes, activation='softmax')(layer)
         return layer
 
